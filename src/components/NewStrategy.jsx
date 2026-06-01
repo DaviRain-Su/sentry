@@ -2,8 +2,10 @@
    RescueGrid — New Strategy flow (intent → policy)
    =========================================================== */
 import { useState } from 'react'
+import { useCurrentAccount } from '@mysten/dapp-kit'
 import { RG } from '../data.js'
 import { Icon, Sparkline } from './primitives.jsx'
+import { WORKER_CONFIGURED, parseIntent } from '../api.js'
 
 function Stepper({ step, steps }) {
   return (
@@ -58,6 +60,9 @@ export function NewStrategy({ onDone, mode, setMode }) {
   const [budget, setBudget] = useState(500)
   const [slip, setSlip] = useState(1.2)
   const [expiry, setExpiry] = useState(14)
+  const [livePreview, setLivePreview] = useState(null)
+  const account = useCurrentAccount()
+  const live = WORKER_CONFIGURED && !!account
   const steps = ['Intent', 'Review', 'Policy', 'Deploy']
   const PARSED = { safe: RG.parsed, dca: RG.parsedDCA, hedge: RG.parsedHedge, risky: RG.parsedRisky }
   const P = PARSED[scenario]
@@ -72,16 +77,20 @@ export function NewStrategy({ onDone, mode, setMode }) {
     return 'safe'
   }
 
-  const parse = () => {
+  const parse = async () => {
     setParsing(true)
     const sc = classify(text)
     const m = PARSED[sc].meta
-    setTimeout(() => {
-      setParsing(false)
-      setScenario(sc)
-      if (m) { setBudget(m.budget); setSlip(m.slip) }
-      setStep(1)
-    }, 1400)
+    if (live) {
+      // real Worker parse (structured strategy + hash + PTB preview + Guardian)
+      try { setLivePreview(await parseIntent(account.address, text)) } catch { setLivePreview(null) }
+    } else {
+      await new Promise(r => setTimeout(r, 1400))
+    }
+    setParsing(false)
+    setScenario(sc)
+    if (m) { setBudget(m.budget); setSlip(m.slip) }
+    setStep(1)
   }
 
   return (
@@ -131,6 +140,41 @@ export function NewStrategy({ onDone, mode, setMode }) {
       {/* STEP 1 — review: parsed intent + PTB + guardian */}
       {step === 1 && (
         <div className="fade-up" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* D3: real Worker parse when live — what you preview is what you sign */}
+          {livePreview?.status === 'ok' && (
+            <div className="card" style={{ padding: 18, borderColor: 'var(--accent)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: 'var(--accent)' }}><Icon name="link" size={16} /></span>
+                  <div className="card-title">On-chain parse · Worker</div>
+                </div>
+                <span className="badge badge-accent"><span className="dot pulse"></span>live · testnet</span>
+              </div>
+              <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)', wordBreak: 'break-all', marginBottom: 10 }}>
+                strategy_hash {livePreview.strategy_hash}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {livePreview.ptb_preview.map((l, i) => (
+                  <div key={i} style={{ fontSize: 12, color: 'var(--t1)' }}><span style={{ color: 'var(--accent)', marginRight: 6 }}>↳</span>{l}</div>
+                ))}
+              </div>
+              {livePreview.guardian_warnings?.length > 0 && (
+                <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {livePreview.guardian_warnings.map((g, i) => (
+                    <span key={i} className={`badge badge-${g.level === 'fail' ? 'danger' : g.level === 'warn' ? 'warn' : 'safe'}`} style={{ fontSize: 10 }}>
+                      <span className="dot"></span>{g.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {livePreview?.status === 'error' && (
+            <div className="card" style={{ padding: 14, borderColor: 'rgba(255,84,112,0.4)' }}>
+              <span className="badge badge-danger" style={{ fontSize: 10 }}>worker parse: {livePreview.code}</span>
+              <span style={{ fontSize: 12, color: 'var(--t1)', marginLeft: 10 }}>{livePreview.message}</span>
+            </div>
+          )}
           <div className="card" style={{ padding: 22 }}>
             <div className="badge badge-accent" style={{ marginBottom: 12 }}><Icon name="sparkles" size={12} /> Interpreted intent</div>
             <h2 className="display" style={{ fontSize: 18, fontWeight: 600 }}>{P.intent}</h2>
