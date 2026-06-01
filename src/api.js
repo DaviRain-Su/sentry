@@ -45,6 +45,11 @@ export function listPolicies(owner) {
   return get(`/api/policies?owner=${owner}`)
 }
 
+/** GET /api/activity?owner= — merged on-chain activity feed for an owner. */
+export function listActivity(owner) {
+  return get(`/api/activity?owner=${owner}`)
+}
+
 /** POST /api/policies/:id/revoke — returns { tx_json } unsigned revoke tx. */
 export function buildRevokeTx(owner, wrapperId) {
   return post(`/api/policies/${wrapperId}/revoke`, { owner, confirmed: true })

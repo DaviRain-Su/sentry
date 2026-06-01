@@ -4,7 +4,29 @@
 import { useState } from 'react'
 import { Icon, fmtUsd } from './primitives.jsx'
 
-export function ActivityView({ activity, onTx }) {
+function LoadingCard({ label }) {
+  return (
+    <div className="card" style={{ padding: 44, textAlign: 'center', color: 'var(--t2)' }}>
+      <Icon name="refresh" size={20} style={{ animation: 'spin 1s linear infinite' }} />
+      <div style={{ marginTop: 10, fontSize: 13 }}>{label}</div>
+    </div>
+  )
+}
+
+function EmptyCard({ icon, title, detail }) {
+  return (
+    <div className="card" style={{ padding: '48px 40px', textAlign: 'center' }}>
+      <div style={{ display: 'inline-flex', width: 48, height: 48, borderRadius: 12, background: 'var(--glass-hi)',
+        color: 'var(--t2)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+        <Icon name={icon} size={22} />
+      </div>
+      <div className="display" style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
+      <div style={{ fontSize: 13, color: 'var(--t2)', maxWidth: 380, margin: '6px auto 0', lineHeight: 1.5 }}>{detail}</div>
+    </div>
+  )
+}
+
+export function ActivityView({ activity, onTx, live = false, loading = false }) {
   const [filter, setFilter] = useState('all')
   const kinds = [
     { id: 'all', label: 'All events' },
@@ -39,7 +61,13 @@ export function ActivityView({ activity, onTx }) {
         <div className="badge badge-neutral"><Icon name="link" size={12} /> verified on-chain</div>
       </div>
 
-      {dates.map(date => (
+      {loading && <LoadingCard label="Loading on-chain activity…" />}
+      {!loading && activity.length === 0 && (
+        <EmptyCard icon="activity" title="No agent activity yet"
+          detail={live ? 'Autonomous executions, policy creations and revocations will appear here once your agent acts on-chain.' : 'Nothing to show.'} />
+      )}
+
+      {!loading && dates.map(date => (
         <div key={date}>
           <div className="eyebrow" style={{ marginBottom: 10, marginLeft: 2 }}>{date}</div>
           <div className="card" style={{ overflow: 'hidden' }}>
@@ -147,7 +175,7 @@ function PolicyCard({ p, onRevoke, onInspect }) {
   )
 }
 
-export function PoliciesView({ policies, onRevoke, onInspect }) {
+export function PoliciesView({ policies, onRevoke, onInspect, live = false, loading = false }) {
   const totalCap = policies.reduce((s, p) => s + p.budgetCap, 0)
   const totalUsed = policies.reduce((s, p) => s + p.budgetUsed, 0)
   return (
@@ -173,9 +201,16 @@ export function PoliciesView({ policies, onRevoke, onInspect }) {
         </div>
       </div>
 
-      <div className="rg-2col">
-        {policies.map(p => <PolicyCard key={p.id} p={p} onRevoke={onRevoke} onInspect={onInspect} />)}
-      </div>
+      {loading && <LoadingCard label="Loading on-chain policies…" />}
+      {!loading && policies.length === 0 && (
+        <EmptyCard icon="shield" title="No policies yet"
+          detail={live ? 'Create a strategy to mint your first Move Policy Object — the agent gets no authority until you do.' : 'Create a strategy to get started.'} />
+      )}
+      {!loading && policies.length > 0 && (
+        <div className="rg-2col">
+          {policies.map(p => <PolicyCard key={p.id} p={p} onRevoke={onRevoke} onInspect={onInspect} />)}
+        </div>
+      )}
     </div>
   )
 }

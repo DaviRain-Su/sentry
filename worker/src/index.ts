@@ -6,7 +6,7 @@ import { cors } from 'hono/cors'
 import { parseIntent } from './parse.js'
 import { strategyHash } from './strategy-core.js'
 import { buildCreatePolicyTx, buildRevokeTx } from './sui-tx.js'
-import { getActivity, listPoliciesByOwner, readWrapper } from './chain.js'
+import { getActivity, listPoliciesByOwner, listActivityByOwner, readWrapper } from './chain.js'
 import { getClient } from './sui-tx.js'
 import { runTick } from './tick.js'
 import { AGENT_ADDRESS } from './config.js'
@@ -118,6 +118,19 @@ app.get('/api/policies', async (c) => {
   }
   try {
     return c.json({ status: 'ok', policies: await listPoliciesByOwner(owner) })
+  } catch (e) {
+    return c.json({ status: 'error', code: 'CHAIN_READ_FAILED', message: String((e as Error).message) }, 502)
+  }
+})
+
+// ── D4: owner activity feed (merged on-chain policy events) ───────────────
+app.get('/api/activity', async (c) => {
+  const owner = c.req.query('owner')
+  if (!owner || !/^0x[0-9a-fA-F]+$/.test(owner)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'owner query param required.' }, 400)
+  }
+  try {
+    return c.json({ status: 'ok', activity: await listActivityByOwner(owner) })
   } catch (e) {
     return c.json({ status: 'error', code: 'CHAIN_READ_FAILED', message: String((e as Error).message) }, 502)
   }

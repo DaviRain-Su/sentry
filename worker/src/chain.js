@@ -94,6 +94,53 @@ export async function listPoliciesByOwner(owner) {
   return out
 }
 
+/** Owner-scoped activity feed merged from all policy-module events. */
+export async function listActivityByOwner(owner) {
+  const client = getClient()
+  // 1) collect raw policy-module events (newest first)
+  const raw = []
+  let cursor = null
+  for (let page = 0; page < 6; page++) {
+    const res = await client.queryEvents({
+      query: { MoveEventModule: { package: RG.package_id, module: 'policy' } },
+      cursor, limit: 50, order: 'descending',
+    })
+    raw.push(...res.data)
+    if (!res.hasNextPage) break
+    cursor = res.nextCursor
+  }
+  // 2) the owner's wrapper ids (from PolicyCreated)
+  const ownedWrappers = new Set(
+    raw.filter(e => String(e.type).endsWith('::PolicyCreated') && e.parsedJson?.owner === owner)
+      .map(e => e.parsedJson.wrapper_id),
+  )
+  // 3) map matching events to feed items
+  const items = []
+  for (const e of raw) {
+    const pj = e.parsedJson || {}
+    if (!pj.wrapper_id || !ownedWrappers.has(pj.wrapper_id)) continue
+    const ts = e.timestampMs ? Number(e.timestampMs) : null
+    const d = ts ? new Date(ts) : null
+    const t = d ? d.toISOString().slice(11, 19) : ''
+    const date = d ? d.toISOString().slice(0, 10) : 'recent'
+    const short = pj.wrapper_id.slice(0, 6) + '…' + pj.wrapper_id.slice(-4)
+    const type = String(e.type).split('::').pop()
+    if (type === 'PolicyCreated') {
+      items.push({ t, date, kind: 'policy', policy: short, title: 'Policy Object created',
+        detail: `Budget ${Number(pj.budget_ceiling) / 1e6} USDC · max slip ${Number(pj.max_slippage_bps) / 100}%`,
+        amount: 0, tx: e.id?.txDigest, risk: null, mode: 'cloud' })
+    } else if (type === 'AgentTradeExecuted') {
+      items.push({ t, date, kind: 'exec', policy: short, title: `Agent trade · ${pj.base_amount_received} base`,
+        detail: `Spent ${Number(pj.quote_amount_spent) / 1e6} USDC · slippage ${pj.slippage_bps}bps · spent ${Number(pj.spent_amount_after) / 1e6}/${Number(pj.budget_ceiling) / 1e6}`,
+        amount: -(Number(pj.quote_amount_spent) / 1e6), tx: e.id?.txDigest, risk: null, mode: 'cloud' })
+    } else if (type === 'PolicyRevoked') {
+      items.push({ t, date, kind: 'guardian', policy: short, title: 'Policy revoked by owner',
+        detail: 'Agent authority deleted on-chain', amount: 0, tx: e.id?.txDigest, risk: null, mode: 'cloud' })
+    }
+  }
+  return items
+}
+
 export async function getActivity(wrapperId, nowMs = Date.now()) {
   const client = getClient()
   const wrapper = await readWrapper(client, wrapperId)
