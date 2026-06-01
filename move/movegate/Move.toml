@@ -1,0 +1,17 @@
+# Vendored MoveGate (github.com/hamzzaaamalik/movegate-contracts) for linking
+# against the already-deployed Sui Testnet package. Sources are unmodified;
+# only this manifest is adjusted with the on-chain addresses so RescueGrid can
+# build against and call the live package.
+#   original package id (type origin) : 0xec91e604...cf884a  -> [addresses] movegate
+#   latest published version (linkage) : 0x1e7fbc6e...c9f46   -> published-at
+[package]
+name = "movegate"
+version = "0.1.0"
+edition = "2024.beta"
+published-at = "0x1e7fbc6ee51094c3df050fade2e37455adfef7de4d9b79c84a168910067c9f46"
+
+[dependencies]
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/testnet" }
+
+[addresses]
+movegate = "0xec91e604714e263ad43723d43470f236607bd0b13f64731aad36b00a61cf884a"
