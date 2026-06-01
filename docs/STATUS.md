@@ -42,6 +42,6 @@ So create / list / activity / revoke are real on testnet. In the browser, a conn
 
 ## Known gaps / next
 
-1. **DBUSDC funding** — the only true remaining gap. Unblock live Deepbook execution (operator-provided DBUSDC or a working faucet), then flip `EXECUTION_ENABLED=true` and replay the execution PTB.
+1. **DBUSDC funding** — the only true remaining gap, and **self-funding is confirmed impossible** on this testnet: DBUSDC `mint` is TreasuryCap-gated (cap not public), DEEP `mint` returns `FunctionNotFound` on the current package, and a SUI→DBUSDC swap needs DEEP for taker fees (a zero-DEEP swap fills 0 even with a live bid). Needs an **external DBUSDC source** (DeepBook-team faucet, or an address that already holds DBUSDC/DEEP). Once the agent BalanceManager holds DBUSDC: flip `EXECUTION_ENABLED=true` and replay the execution PTB (`worker/src/deepbook.js` `buildExecutionTx`).
 2. **Browser wallet click-through** — connect Slush (testnet) and run create/revoke from the UI (the on-chain txs above prove the underlying path; UI uses the same builders via dapp-kit).
 3. **zkLogin live test** (optional) — only if using Enoki instead of a wallet.
