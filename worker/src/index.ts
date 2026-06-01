@@ -6,6 +6,7 @@ import { cors } from 'hono/cors'
 import { parseIntent } from './parse.js'
 import { strategyHash } from './strategy-core.js'
 import { buildCreatePolicyTx } from './sui-tx.js'
+import { getActivity } from './chain.js'
 import { AGENT_ADDRESS } from './config.js'
 import type { ParseDefaults, Strategy } from './types.js'
 
@@ -71,9 +72,19 @@ app.post('/api/policies', async (c) => {
   })
 })
 
-// ── E4: aggregated activity ───────────────────────────────────────────────
-app.get('/api/policies/:wrapper_id/activity', (c) =>
-  c.json({ status: 'error', code: 'NOT_IMPLEMENTED', message: 'E4 pending.' }, 501))
+// ── E4: aggregated activity (chain-authoritative) ─────────────────────────
+app.get('/api/policies/:wrapper_id/activity', async (c) => {
+  const wrapperId = c.req.param('wrapper_id')
+  if (!/^0x[0-9a-fA-F]+$/.test(wrapperId)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid wrapper id.' }, 400)
+  }
+  try {
+    const result = await getActivity(wrapperId)
+    return c.json(result, result.status === 'ok' ? 200 : 404)
+  } catch (e) {
+    return c.json({ status: 'error', code: 'CHAIN_READ_FAILED', message: String((e as Error).message) }, 502)
+  }
+})
 
 // ── revoke ────────────────────────────────────────────────────────────────
 app.post('/api/policies/:wrapper_id/revoke', (c) =>
