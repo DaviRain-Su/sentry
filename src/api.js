@@ -50,6 +50,16 @@ export function listActivity(owner) {
   return get(`/api/activity?owner=${owner}`)
 }
 
+/** GET /api/summary?owner= — real portfolio aggregates + positions. */
+export function getSummary(owner) {
+  return get(`/api/summary?owner=${owner}`)
+}
+
+/** GET /api/market — live SUI/DBUSDC price from the DeepBook indexer. */
+export function getMarket() {
+  return get('/api/market')
+}
+
 /** POST /api/policies/:id/revoke — returns { tx_json } unsigned revoke tx. */
 export function buildRevokeTx(owner, wrapperId) {
   return post(`/api/policies/${wrapperId}/revoke`, { owner, confirmed: true })

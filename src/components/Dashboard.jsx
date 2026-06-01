@@ -69,11 +69,19 @@ function PriceChart({ data, crashState }) {
   )
 }
 
-export function Dashboard({ state }) {
+export function Dashboard({ state, live }) {
   const { risk, suiPrice, suiSpark, crashState, mode, agentOn, activity } = state
   const p = RG.portfolio
   const animPrice = useAnimatedNumber(suiPrice, 500)
   const animTotal = useAnimatedNumber(p.total, 700)
+
+  // ── live mode: real on-chain data (summary/market/activity) ───────────
+  const liveOn = !!live
+  const sum = live?.summary
+  const usd6 = (u) => fmtUsd(Number(u || 0) / 1e6, 0)
+  const livePrice = liveOn ? Number(live?.market?.SUI_DBUSDC?.last_price ?? suiPrice) : animPrice
+  const feed = liveOn ? (live?.activity || []) : activity
+  const advisory = liveOn ? <span className="badge badge-neutral" style={{ fontSize: 9, marginLeft: 6 }}>advisory</span> : null
 
   const banner = crashState === 'crashing'
     ? { c: 'var(--danger)', bg: 'var(--danger-dim)', icon: 'alert', t: 'Flash crash detected · SUI −8.4% in 6 min', s: 'Risk score spiking — agent evaluating rescue conditions…' }
@@ -102,13 +110,23 @@ export function Dashboard({ state }) {
 
       {/* KPI row */}
       <div className="rg-kpi">
-        <StatCard label="Portfolio value" value={`$${fmtUsd(animTotal)}`} icon="wallet"
-          sub={{ text: `${p.chg24h > 0 ? '+' : ''}${p.chg24h}% · 24h`, color: p.chg24h < 0 ? 'var(--danger)' : 'var(--safe)' }} />
-        <StatCard label="Free budget" value={`$${fmtUsd(p.available, 0)}`} icon="coin" accent="var(--accent)"
-          sub={{ text: `$${fmtUsd(p.deployed, 0)} deployed`, color: 'var(--t1)' }} />
+        {liveOn ? (
+          <StatCard label="Authorized budget" value={`$${usd6(sum?.total_authorized)}`} icon="wallet"
+            sub={{ text: `${sum?.active_policies ?? 0} active polic${(sum?.active_policies ?? 0) === 1 ? 'y' : 'ies'}`, color: 'var(--t1)' }} />
+        ) : (
+          <StatCard label="Portfolio value" value={`$${fmtUsd(animTotal)}`} icon="wallet"
+            sub={{ text: `${p.chg24h > 0 ? '+' : ''}${p.chg24h}% · 24h`, color: p.chg24h < 0 ? 'var(--danger)' : 'var(--safe)' }} />
+        )}
+        {liveOn ? (
+          <StatCard label="Deployed" value={`$${usd6(sum?.total_deployed)}`} icon="coin" accent="var(--accent)"
+            sub={{ text: `of $${usd6(sum?.total_authorized)} authorized`, color: 'var(--t1)' }} />
+        ) : (
+          <StatCard label="Free budget" value={`$${fmtUsd(p.available, 0)}`} icon="coin" accent="var(--accent)"
+            sub={{ text: `$${fmtUsd(p.deployed, 0)} deployed`, color: 'var(--t1)' }} />
+        )}
         <StatCard label="Agent status" value={agentOn ? 'Autonomous' : 'Paused'} icon="bolt"
           accent={agentOn ? 'var(--accent)' : 'var(--t2)'}
-          sub={{ text: mode === 'cloud' ? 'Cloud · Worker' : 'Local · Ollama', color: 'var(--t1)' }} />
+          sub={{ text: liveOn ? (mode === 'cloud' ? 'Cloud · on-chain' : 'Local · on-chain') : (mode === 'cloud' ? 'Cloud · Worker' : 'Local · Ollama'), color: 'var(--t1)' }} />
         <StatCard label="Risk score" value={Math.round(risk)} icon="shield"
           accent={risk >= 70 ? 'var(--danger)' : risk >= 45 ? 'var(--warn)' : 'var(--safe)'}
           spark={RG.riskHistory} sparkColor={risk >= 70 ? 'var(--danger)' : risk >= 45 ? 'var(--warn)' : 'var(--safe)'}
@@ -125,12 +143,12 @@ export function Dashboard({ state }) {
                 <PairGlyph pair="SUI/USDC" />
                 <div>
                   <div className="card-title">SUI / USDC</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--t2)' }}>Deepbook v3 · price via Pyth</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--t2)' }}>{liveOn ? 'Deepbook v3 · live indexer' : 'Deepbook v3 · price via Pyth'}</div>
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div className="mono" style={{ fontSize: 22, fontWeight: 600, color: crashState === 'crashing' ? 'var(--danger)' : 'var(--t0)' }}>
-                  ${animPrice.toFixed(3)}
+                  ${(liveOn ? livePrice : animPrice).toFixed(3)}
                 </div>
                 <div className="mono" style={{ fontSize: 12, fontWeight: 600, color: RG.prices.SUI.chg < 0 ? 'var(--danger)' : 'var(--safe)' }}>
                   {crashState === 'crashing' || crashState === 'rescuing' || crashState === 'rescued' ? '−8.42%' : `${RG.prices.SUI.chg}%`}
@@ -145,9 +163,35 @@ export function Dashboard({ state }) {
           {/* positions */}
           <div className="card">
             <div className="card-hd" style={{ paddingBottom: 12 }}>
-              <div className="card-title">Open positions</div>
-              <div className="badge badge-neutral">{RG.positions.length} active</div>
+              <div className="card-title">{liveOn ? 'Active policies' : 'Open positions'}</div>
+              <div className="badge badge-neutral">{liveOn ? `${sum?.positions?.length ?? 0} on-chain` : `${RG.positions.length} active`}</div>
             </div>
+            {liveOn ? (
+              <div style={{ padding: '0 6px 8px' }}>
+                {(sum?.positions?.length ?? 0) === 0 && <div style={{ padding: '14px 12px', fontSize: 12.5, color: 'var(--t2)' }}>No policies yet — create a strategy.</div>}
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>
+                    {(sum?.positions ?? []).map((po, i) => {
+                      const used = Math.round((Number(po.spent_amount) / Number(po.budget_ceiling || 1)) * 100)
+                      return (
+                        <tr key={po.wrapper_id} style={{ borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                          <td style={{ padding: '11px 12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <PairGlyph pair="SUI/USDC" />
+                              <span className="mono" style={{ fontSize: 11.5, color: 'var(--sui)' }}>{po.wrapper_id.slice(0, 6)}…{po.wrapper_id.slice(-4)}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '11px 12px', textAlign: 'right' }} className="mono">{fmtUsd(Number(po.spent_amount) / 1e6, 0)} / {fmtUsd(Number(po.budget_ceiling) / 1e6, 0)} USDC</td>
+                          <td style={{ padding: '11px 12px', textAlign: 'right' }}>
+                            <span className={`badge ${po.status === 'active' ? 'badge-safe' : 'badge-warn'}`}><span className={`dot ${po.status === 'active' ? 'pulse' : ''}`}></span>{po.status} · {used}%</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
             <div style={{ padding: '0 6px 8px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -185,6 +229,7 @@ export function Dashboard({ state }) {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
         </div>
 
@@ -193,7 +238,7 @@ export function Dashboard({ state }) {
           <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 18px',
             ...(crashState === 'crashing' ? { animation: 'flash-pulse 1.1s ease infinite' } : {}) }}>
             <div style={{ alignSelf: 'flex-start', display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: 6 }}>
-              <div className="card-title">Risk monitor</div>
+              <div className="card-title">Risk monitor{advisory}</div>
               <div className="badge badge-accent"><span className="dot pulse"></span>LIVE</div>
             </div>
             <RiskGauge score={risk} />
@@ -219,7 +264,10 @@ export function Dashboard({ state }) {
               <span style={{ color: 'var(--accent)' }}><Icon name="bolt" size={16} /></span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', maxHeight: 230, overflowY: 'auto' }}>
-              {activity.slice(0, 6).map((a, i) => (
+              {liveOn && feed.length === 0 && (
+                <div style={{ padding: '18px', fontSize: 12, color: 'var(--t2)' }}>No on-chain activity yet.</div>
+              )}
+              {feed.slice(0, 6).map((a, i) => (
                 <div key={a.t + i} className={i === 0 && crashState === 'rescuing' ? 'fade-up' : ''}
                   style={{ display: 'flex', gap: 11, padding: '10px 18px', borderTop: i ? '1px solid var(--border)' : 'none' }}>
                   <div style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center',

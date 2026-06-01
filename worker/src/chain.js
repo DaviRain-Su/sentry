@@ -94,6 +94,40 @@ export async function listPoliciesByOwner(owner) {
   return out
 }
 
+/** Real portfolio summary for an owner: aggregates + per-policy positions. */
+export async function getOwnerSummary(owner, nowMs = Date.now()) {
+  const client = getClient()
+  const policies = await listPoliciesByOwner(owner)
+  const positions = []
+  for (const p of policies) {
+    const w = await readWrapper(client, p.wrapper_id)
+    if (!w) continue
+    const m = await readMandate(client, w.mandate_id)
+    const status = m?.revoked ? 'revoked' : (m && nowMs >= Number(m.expires_at_ms)) ? 'expired' : 'active'
+    positions.push({
+      wrapper_id: p.wrapper_id, pool_id: w.pool_id, budget_ceiling: w.budget_ceiling,
+      spent_amount: w.spent_amount, max_slippage_bps: w.max_slippage_bps, status,
+    })
+  }
+  const active = positions.filter(p => p.status === 'active')
+  const sum = (arr, k) => arr.reduce((s, p) => s + Number(p[k]), 0)
+  return {
+    active_policies: active.length,
+    total_policies: positions.length,
+    total_authorized: sum(active, 'budget_ceiling'),
+    total_deployed: sum(active, 'spent_amount'),
+    positions,
+  }
+}
+
+/** Live market snapshot from the DeepBook testnet indexer ticker. */
+export async function getMarket() {
+  const res = await fetch('https://deepbook-indexer.testnet.mystenlabs.com/ticker')
+  const t = await res.json()
+  const pick = (k) => (t[k] ? { last_price: t[k].last_price, base_volume: t[k].base_volume } : null)
+  return { SUI_DBUSDC: pick('SUI_DBUSDC'), DEEP_DBUSDC: pick('DEEP_DBUSDC'), WAL_DBUSDC: pick('WAL_DBUSDC') }
+}
+
 /** Owner-scoped activity feed merged from all policy-module events. */
 export async function listActivityByOwner(owner) {
   const client = getClient()

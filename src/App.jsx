@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useCurrentAccount, useSuiClient, useSignAndExecuteTransaction, useDisconnectWallet } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { RG } from './data.js'
-import { WORKER_CONFIGURED, parseIntent, buildPolicyTx, activatePolicy, listPolicies, listActivity, buildRevokeTx } from './api.js'
+import { WORKER_CONFIGURED, parseIntent, buildPolicyTx, activatePolicy, listPolicies, listActivity, getSummary, getMarket, buildRevokeTx } from './api.js'
 import { Icon, Logo, Token, hexToRgba } from './components/primitives.jsx'
 import { ZkLogin } from './components/ZkLogin.jsx'
 import { Dashboard } from './components/Dashboard.jsx'
@@ -160,14 +160,18 @@ export default function App({ onExit }) {
     expires: new Date(Number(p.expires_at_ms)).toISOString(), created: '2026-06-02', execs: 0,
   })
   const [liveActivity, setLiveActivity] = useState([])
+  const [liveSummary, setLiveSummary] = useState(null)
+  const [liveMarket, setLiveMarket] = useState(null)
   const [liveLoading, setLiveLoading] = useState(false)
   const refreshLivePolicies = async () => {
     if (!liveMode) return
     setLiveLoading(true)
     try {
-      const [pr, ar] = await Promise.all([listPolicies(owner), listActivity(owner)])
+      const [pr, ar, sr, mr] = await Promise.all([listPolicies(owner), listActivity(owner), getSummary(owner), getMarket()])
       if (pr.status === 'ok') setPolicies(pr.policies.map(mapLivePolicy))
       if (ar.status === 'ok') setLiveActivity(ar.activity)
+      if (sr.status === 'ok') setLiveSummary(sr.summary)
+      if (mr.status === 'ok') setLiveMarket(mr.market)
     } catch { /* keep current */ }
     finally { setLiveLoading(false) }
   }
@@ -439,7 +443,7 @@ export default function App({ onExit }) {
                 </button>
               </div>
             )}
-            {view === 'dashboard' && <Dashboard state={state} />}
+            {view === 'dashboard' && <Dashboard state={state} live={liveMode ? { summary: liveSummary, market: liveMarket, activity: liveActivity } : null} />}
             {view === 'new' && <NewStrategy mode={mode} setMode={setMode} onDone={deployPolicy} />}
             {view === 'activity' && <ActivityView activity={liveMode ? liveActivity : activity} onTx={setTxView} live={liveMode} loading={liveMode && liveLoading} />}
             {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} live={liveMode} loading={liveMode && liveLoading} />}
