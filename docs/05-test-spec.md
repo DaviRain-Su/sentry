@@ -6,7 +6,7 @@
 
 ## 1. Test Layers
 
-- Move unit tests：Policy 创建、撤销、授权、预算、滑点、过期、事件。
+- Move unit tests：Mandate + Wrapper 创建、撤销、授权、预算、滑点、过期、事件。
 - Worker API tests：intent parse、preview、policy API、activity API、agent tick。
 - Guardian tests：各类 block reason 和允许路径。
 - Integration tests：Worker + Sui Testnet package + Deepbook execution。
@@ -19,14 +19,17 @@
 
 Happy path:
 
-- owner 创建有效 Policy，事件 `PolicyCreated` 字段完整。
+- owner 创建有效 Policy（同时创建 MoveGate Mandate + RescuePolicyWrapper），事件 `PolicyCreated` 包含 `mandate_id` 和 `wrapper_id`。
 - `budget_ceiling > 0` 且 `max_slippage_bps <= MAX_ALLOWED_SLIPPAGE_BPS` 创建成功。
-- 创建后的 Policy 是 shared object，授权 agent 后续可以在 PTB 中引用它。
+- 创建后的 `RescuePolicyWrapper` 是 shared object，MoveGate Mandate 也必须可被授权 agent 后续无 owner co-sign 引用。
+- `mandate_id` 在 Wrapper 中正确关联。
+- MoveGate creation fee payment、FeeConfig、ProtocolTreasury、MandateRegistry、AgentRegistry 和 AgentPassport 参数全部正确传入。
 
 Boundary:
 
 - `max_slippage_bps == MAX_ALLOWED_SLIPPAGE_BPS` 创建成功。
 - `expires_at_ms` 恰好等于最大生命周期边界时创建成功。
+- MoveGate Mandate expiry 采用 `now_ms < expires_at_ms`，因此执行时 `now_ms == expires_at_ms` 必须被视为 expired。
 
 Error / attack:
 
@@ -40,7 +43,8 @@ Error / attack:
 
 Happy path:
 
-- owner 撤销未撤销 Policy，`revoked = true`，发出 `PolicyRevoked`。
+- owner 撤销未撤销 Policy，调用 MoveGate `revoke_mandate`，发出 `PolicyRevoked`。
+- MoveGate Mandate 的 `revoked` 标志被设置。
 
 Boundary:
 
@@ -49,26 +53,24 @@ Boundary:
 Error / attack:
 
 - 非 owner 撤销 abort。
-- 重复撤销 abort。
+- 重复撤销 abort（MoveGate 层拒绝）。
 
-### `assert_agent_authorized`
+### `assert_policy_valid`
 
 Happy path:
 
-- 正确 agent、pool、预算、滑点、未过期、未撤销时通过。
+- 正确 pool_id、预算、滑点、agent 匹配时通过。
+- 注意：agent/revoked/expiry 由 MoveGate `authorize_action` 层检验，`assert_policy_valid` 只检查 RescueGrid 特有约束。
 
 Boundary:
 
 - `spent_amount + amount == budget_ceiling` 通过。
 - `slippage_bps == max_slippage_bps` 通过。
-- `now_ms == expires_at_ms` 通过。
 
 Error / attack:
 
-- 错误 agent abort。
 - 错误 pool abort。
-- revoked policy abort。
-- expired policy abort。
+- 错误 agent abort。
 - `spent_amount + amount > budget_ceiling` abort。
 - `slippage_bps > max_slippage_bps` abort。
 - `spent_amount + amount` 溢出 abort。
@@ -78,8 +80,10 @@ Error / attack:
 Happy path:
 
 - 成功记录交易后 `spent_amount` 增加。
-- 事件 `AgentTradeExecuted` 包含 policy、agent、pool、spent after、budget、slippage、client order id、timestamp。
-- Dashboard 从事件 metadata 读取 transaction digest，而不是从 Move event payload 读取。
+- MoveGate AuthToken 通过 `movegate::receipt::create_success_receipt` 被正确消费（PTB 结束后无法再使用）。
+- MoveGate ActionReceipt 被创建并 freeze。
+- 事件 `AgentTradeExecuted` 包含 `mandate_id`、`wrapper_id`、agent、pool、spent after、budget、slippage、client order id、timestamp。
+- Dashboard 从事件 metadata 读取 transaction digest。
 
 Boundary:
 
@@ -90,18 +94,19 @@ Error / attack:
 - `quote_amount_spent == 0` abort。
 - 非授权 agent abort。
 - 超预算 abort。
-- 撤销后记录 abort。
+- 撤销后记录 abort（MoveGate AuthToken 无法从已撤销 Mandate 获得）。
+- AuthToken 来源不是当前 Policy 关联的 Mandate abort。
+- AuthToken protocol 不是 `RESCUEGRID_PROTOCOL_ADDRESS` abort。
+- AuthToken amount 不等于 `quote_amount_spent` abort。
 
-### `record_guardian_block`
+### Guardian block runtime log
 
 Happy path:
 
-- 授权 agent 可记录 block event。
+- Guardian block 写入 Worker runtime activity log。
+- 不提交 Deepbook transaction。
+- 不创建 MoveGate ActionReceipt。
 - 不改变 `spent_amount`。
-
-Error / attack:
-
-- 非授权 agent abort。
 
 ## 3. Worker API Tests
 
@@ -118,6 +123,7 @@ Boundary:
 
 - 用户省略滑点时使用 `DEFAULT_MAX_SLIPPAGE_BPS`。
 - 用户省略过期时间时使用默认有效期，但不超过最大生命周期。
+- `strategy_hash` canonicalization 覆盖空输入、中文输入和大数字 decimal string；必须匹配 `docs/03-technical-spec.md` 的 hash vectors。
 
 Error:
 
@@ -131,7 +137,7 @@ Error:
 Happy path:
 
 - `confirmed=true` 且 strategy hash 匹配时创建 Policy。
-- 成功响应包含 `policy_id`、`tx_digest`、`agent_address`。
+- 成功响应包含 `policy_id`、`mandate_id`、`wrapper_id`、`tx_digest`、`agent_address`。
 - Durable Object 被激活。
 
 Error:
@@ -142,7 +148,7 @@ Error:
 - 活跃 Policy 数达到 `MAX_ACTIVE_POLICIES_PER_DEPLOYMENT` 时返回 `ACTIVE_POLICY_LIMIT_REACHED`。
 - Sui transaction 失败时不激活 Durable Object。
 
-### `POST /api/policies/:id/revoke`
+### `POST /api/policies/:wrapper_id/revoke`
 
 Happy path:
 
@@ -153,11 +159,11 @@ Error:
 - 非 owner 请求拒绝。
 - 已撤销 Policy 返回 `ALREADY_REVOKED`，且不提交第二笔 revoke transaction。
 
-### `GET /api/policies/:id/activity`
+### `GET /api/policies/:wrapper_id/activity`
 
 Happy path:
 
-- 返回 chain policy snapshot、runtime state、events。
+- 返回 MoveGate Mandate snapshot、RescuePolicyWrapper snapshot、runtime state、events。
 - budget 数字以字符串返回，避免 JS integer loss。
 - 当链上状态与 Durable Object runtime state 冲突时，链上状态优先，`runtime_state_stale=true`。
 
@@ -172,6 +178,7 @@ Happy path:
 
 - trigger false 返回 `action=no_op`。
 - trigger true 且检查通过返回 `action=executed` 和 tx digest。
+- 内部 token 有效且 `RESCUEGRID_DEMO_MODE=true` 时，`force_trigger=true` 可以绕过自然市场触发条件。
 
 Blocked:
 
@@ -185,12 +192,14 @@ Error:
 
 - market read failed 返回 `error`，不提交交易。
 - Deepbook transaction failed 返回 `error`，不更新成功状态。
+- 缺失或错误 internal token 时返回 `401` 或 `403`，不运行 tick。
+- 生产部署或 `RESCUEGRID_DEMO_MODE=false` 时提交 `force_trigger=true` 返回 `FORCE_TRIGGER_DISABLED`。
 
 ## 4. Guardian Tests
 
 Happy path:
 
-- 剩余额度足够、滑点在范围内、pool 匹配、Policy active 时 allow。
+- Mandate 未撤销/未过期，Wrapper 剩余额度足够、滑点在范围内、pool 匹配时 allow。
 
 Boundary:
 
@@ -201,8 +210,9 @@ Block cases:
 
 - proposed amount 大于 remaining budget。
 - estimated slippage 大于 max slippage。
-- Policy revoked。
-- Policy expired。
+- MoveGate Mandate revoked。
+- MoveGate Mandate expired。
+- Wrapper mandate_id 与 Mandate id 不一致。测试构造方式：创建两个有效 Mandate/Wrapper fixture，故意把 Wrapper A 与 Mandate B 传入 Guardian；预期返回 `MANDATE_MISMATCH`，不提交交易。
 - pool mismatch。
 - remaining budget 为 0。
 
@@ -217,19 +227,21 @@ Advisory:
 
 1. Deploy Move package to Sui Testnet.
 2. Create Policy with test owner and agent.
-3. Read object and verify fields.
+3. Read MoveGate Mandate and RescuePolicyWrapper, then verify linked fields.
 4. Revoke Policy.
-5. Confirm subsequent agent trade record aborts.
+5. Confirm subsequent `authorize_action` + trade record aborts.
 
 ### Agent autonomous execution
 
-1. Create active Policy with sufficient Testnet budget.
+1. Create active Policy with sufficient Testnet budget（MoveGate Mandate + RescuePolicyWrapper）。
 2. Activate Durable Object runtime.
 3. In automated tests, use a dev-only mock price feed or `force_trigger=true` test hook to satisfy the trigger condition; natural market movement is not required.
 4. Run agent tick.
 5. Confirm Deepbook transaction digest exists.
-6. Confirm `AgentTradeExecuted` event exists.
-7. Confirm `spent_amount` increased.
+6. Confirm `AgentTradeExecuted` event exists with correct `mandate_id` and `wrapper_id`.
+7. Confirm `spent_amount` increased in RescuePolicyWrapper.
+8. Confirm MoveGate ActionReceipt was created（`freeze_object`）。
+9. Confirm MoveGate Mandate `spent_this_epoch` and `total_actions` updated.
 
 Production-like e2e tests must not depend on `force_trigger=true`; they must use a controlled mock market provider in non-production or a real trigger condition.
 
@@ -247,15 +259,15 @@ Production-like e2e tests must not depend on `force_trigger=true`; they must use
 2. Revoke as owner.
 3. Run agent tick.
 4. Confirm action is `stopped_revoked`.
-5. Attempt direct `record_agent_trade` as agent.
+5. Attempt direct `authorize_action` + `record_agent_trade` as agent.
 6. Confirm chain abort.
 
 ### Concurrent policy isolation
 
-1. Create 10 active policies with distinct owners and policy ids.
+1. Create 10 active policies with distinct owners and wrapper ids.
 2. Activate 10 Durable Object runtimes.
 3. Run one tick for each policy.
-4. Confirm each runtime reads only its own policy id, budget, market snapshot and last action.
+4. Confirm each runtime reads only its own mandate id, wrapper id, budget, market snapshot and last action.
 5. Confirm creating an 11th active policy returns `ACTIVE_POLICY_LIMIT_REACHED`.
 
 ## 6. Browser QA
@@ -299,7 +311,7 @@ The final demo must prove this exact sequence:
 3. Enter: “当 SUI 下跌超过 8% 时启动 500 USDC 救援网格。”
 4. Show structured strategy and PTB preview.
 5. Confirm and create Policy.
-6. Show Policy object id and budget ceiling.
+6. Show mandate id, wrapper id and budget ceiling.
 7. Let Cloud Agent tick execute one Deepbook Testnet trade; demo may use a dev-only manual trigger or mock price feed if the real 8% price drop is not happening.
 8. Show transaction digest and `AgentTradeExecuted` event.
 9. Revoke Policy from Dashboard.
@@ -312,7 +324,7 @@ Passing criteria:
 - At least one real Deepbook-related execution is visible, or a documented Testnet blocker is explicitly shown with fallback approved before demo.
 - Revocation is visible both in UI and chain state.
 - No step requires exposing a user private key to the Agent.
-- The deployed agent address shown in preview matches the agent recorded in the Policy.
+- The deployed agent address shown in preview matches the agent recorded in the Mandate and Wrapper.
 
 ## 8. Open Test Decisions
 
