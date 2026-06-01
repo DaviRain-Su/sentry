@@ -152,12 +152,13 @@ export default function App({ onExit }) {
     setActivity(RG.activity); setPolicies(RG.policies)
   }
 
-  // Live policies (D4): load the owner's on-chain policies from PolicyCreated events.
-  const mapLivePolicy = (p) => ({
+  // Live policies (D4): load the owner's on-chain policies from PolicyCreated events,
+  // enriched with the real current spend/status from the summary.
+  const mapLivePolicy = (p, spentUnits = 0, status = 'active') => ({
     id: p.wrapper_id.slice(0, 6) + '…' + p.wrapper_id.slice(-4),
     _wrapperId: p.wrapper_id, _mandateId: p.mandate_id,
-    name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', status: 'active', mode,
-    budgetCap: Number(p.budget_ceiling) / 1e6, budgetUsed: 0,
+    name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', status: status === 'active' ? 'active' : 'paused', mode,
+    budgetCap: Number(p.budget_ceiling) / 1e6, budgetUsed: Number(spentUnits) / 1e6,
     scope: ['SUI/USDC'], maxSlippage: p.max_slippage_bps / 100,
     expires: new Date(Number(p.expires_at_ms)).toISOString(), created: '2026-06-02', execs: 0,
   })
@@ -171,9 +172,17 @@ export default function App({ onExit }) {
     setLiveLoading(true)
     try {
       const [pr, ar, sr, mr, br] = await Promise.all([listPolicies(owner), listActivity(owner), getSummary(owner), getMarket(), getBalances(owner)])
-      if (pr.status === 'ok') setPolicies(pr.policies.map(mapLivePolicy))
-      if (ar.status === 'ok') setLiveActivity(ar.activity)
       if (sr.status === 'ok') setLiveSummary(sr.summary)
+      if (pr.status === 'ok') {
+        // enrich each policy with real spend + status from the summary, drop revoked
+        const pos = {}
+        if (sr.status === 'ok') sr.summary.positions.forEach(po => { pos[po.wrapper_id] = po })
+        const live = pr.policies
+          .filter(p => (pos[p.wrapper_id]?.status ?? 'active') !== 'revoked')
+          .map(p => mapLivePolicy(p, pos[p.wrapper_id]?.spent_amount ?? 0, pos[p.wrapper_id]?.status ?? 'active'))
+        setPolicies(live)
+      }
+      if (ar.status === 'ok') setLiveActivity(ar.activity)
       if (mr.status === 'ok') setLiveMarket(mr.market)
       if (br.status === 'ok') setLiveHoldings(br.holdings)
     } catch { /* keep current */ }

@@ -82,6 +82,11 @@ export function Dashboard({ state, live }) {
   const livePrice = liveOn ? Number(live?.market?.SUI_DBUSDC?.last_price ?? suiPrice) : animPrice
   const feed = liveOn ? (live?.activity || []) : activity
   const advisory = liveOn ? <span className="badge badge-neutral" style={{ fontSize: 9, marginLeft: 6 }}>advisory</span> : null
+  // live advisory risk score, derived from real budget utilisation + concentration
+  const activePos = (sum?.positions || []).filter(po => po.status === 'active')
+  const util = sum && sum.total_authorized > 0 ? sum.total_deployed / sum.total_authorized : 0
+  const conc = activePos.length > 0 ? 1 / activePos.length : 0
+  const shownRisk = liveOn ? Math.min(95, Math.round(15 + util * 50 + conc * 30)) : risk
 
   const banner = crashState === 'crashing'
     ? { c: 'var(--danger)', bg: 'var(--danger-dim)', icon: 'alert', t: 'Flash crash detected · SUI −8.4% in 6 min', s: 'Risk score spiking — agent evaluating rescue conditions…' }
@@ -127,10 +132,10 @@ export function Dashboard({ state, live }) {
         <StatCard label="Agent status" value={agentOn ? 'Autonomous' : 'Paused'} icon="bolt"
           accent={agentOn ? 'var(--accent)' : 'var(--t2)'}
           sub={{ text: liveOn ? (mode === 'cloud' ? 'Cloud · on-chain' : 'Local · on-chain') : (mode === 'cloud' ? 'Cloud · Worker' : 'Local · Ollama'), color: 'var(--t1)' }} />
-        <StatCard label="Risk score" value={Math.round(risk)} icon="shield"
-          accent={risk >= 70 ? 'var(--danger)' : risk >= 45 ? 'var(--warn)' : 'var(--safe)'}
-          spark={RG.riskHistory} sparkColor={risk >= 70 ? 'var(--danger)' : risk >= 45 ? 'var(--warn)' : 'var(--safe)'}
-          sub={{ text: risk >= 70 ? 'critical' : risk >= 45 ? 'elevated' : 'stable', color: risk >= 70 ? 'var(--danger)' : risk >= 45 ? 'var(--warn)' : 'var(--safe)' }} />
+        <StatCard label={liveOn ? 'Risk score · advisory' : 'Risk score'} value={Math.round(shownRisk)} icon="shield"
+          accent={shownRisk >= 70 ? 'var(--danger)' : shownRisk >= 45 ? 'var(--warn)' : 'var(--safe)'}
+          spark={RG.riskHistory} sparkColor={shownRisk >= 70 ? 'var(--danger)' : shownRisk >= 45 ? 'var(--warn)' : 'var(--safe)'}
+          sub={{ text: shownRisk >= 70 ? 'critical' : shownRisk >= 45 ? 'elevated' : 'stable', color: shownRisk >= 70 ? 'var(--danger)' : shownRisk >= 45 ? 'var(--warn)' : 'var(--safe)' }} />
       </div>
 
       {/* main grid */}
@@ -241,7 +246,7 @@ export function Dashboard({ state, live }) {
               <div className="card-title">Risk monitor{advisory}</div>
               <div className="badge badge-accent"><span className="dot pulse"></span>LIVE</div>
             </div>
-            <RiskGauge score={risk} />
+            <RiskGauge score={shownRisk} />
             <div style={{ width: '100%', marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
                 { k: 'Volatility (1h)', v: crashState === 'crashing' ? 'extreme' : 'moderate', lv: crashState === 'crashing' ? 'danger' : 'warn' },
@@ -256,7 +261,7 @@ export function Dashboard({ state, live }) {
             </div>
           </div>
 
-          <ReasoningPanel crashState={crashState} mode={mode} />
+          <ReasoningPanel crashState={crashState} mode={mode} live={liveOn} />
 
           <div className="card">
             <div className="card-hd" style={{ paddingBottom: 10 }}>
@@ -290,7 +295,7 @@ export function Dashboard({ state, live }) {
   )
 }
 
-function ReasoningPanel({ crashState, mode }) {
+function ReasoningPanel({ crashState, mode, live }) {
   const key = crashState === 'idle' ? 'idle' : (crashState === 'rescued' ? 'rescued' : 'crashing')
   const R = RG.riskFactors[key]
   const maxW = 45
@@ -300,7 +305,7 @@ function ReasoningPanel({ crashState, mode }) {
       <div className="card-hd" style={{ paddingBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ color: 'var(--accent)' }}><Icon name="sparkles" size={16} /></span>
-          <div className="card-title">Agent reasoning</div>
+          <div className="card-title">Agent reasoning{live && <span className="badge badge-neutral" style={{ fontSize: 9, marginLeft: 6 }}>advisory</span>}</div>
         </div>
         <span className="badge badge-neutral" style={{ fontSize: 9.5 }}>
           <Icon name={mode === 'local' ? 'cpu' : 'cloud'} size={10} />{mode === 'local' ? 'on-device' : 'cloud'}</span>
