@@ -360,7 +360,7 @@ export default function App() {
             alignItems: 'center', padding: '0 26px', gap: 20, background: 'rgba(8,11,17,0.5)', backdropFilter: 'blur(10px)' }}>
             <div style={{ flex: 1 }}>
               <h1 className="display" style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{titles[view].t}</h1>
-              <div style={{ fontSize: 11.5, color: 'var(--t2)' }}>{titles[view].s}</div>
+              <div className="rg-subtitle" style={{ fontSize: 11.5, color: 'var(--t2)' }}>{titles[view].s}</div>
             </div>
 
             {/* price ticker */}
@@ -423,11 +423,11 @@ export default function App() {
             {crashState === 'idle' ? (
               <button className="btn btn-sm" onClick={simulateCrash} disabled={halted}
                 style={{ borderColor: 'var(--danger)', color: 'var(--danger)', background: 'var(--danger-dim)', opacity: halted ? 0.4 : 1 }}>
-                <Icon name="alert" size={14} /> Simulate flash crash
+                <Icon name="alert" size={14} /> <span className="rg-navlabel">Simulate flash crash</span>
               </button>
             ) : (
               <button className="btn btn-sm btn-ghost" onClick={resetDemo}>
-                <Icon name="refresh" size={14} /> Reset demo
+                <Icon name="refresh" size={14} /> <span className="rg-navlabel">Reset demo</span>
               </button>
             )}
           </header>
