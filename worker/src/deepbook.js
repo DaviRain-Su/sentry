@@ -20,30 +20,38 @@ export const ORDER_TYPE_NO_RESTRICTION = 0
 export const SELF_MATCHING_ALLOWED = 0
 export const FLOAT_SCALING = 1_000_000_000n // 1e9 price scaling
 
-const DBUSDC_PKG = DB.dbusdc_coin_type.split('::')[0]
+const DEEP_TYPE = '0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP'
 
 /**
- * Agent setup (agent-signed, one PTB): faucet-mint DBUSDC, create a
- * BalanceManager, deposit the funds, and share the manager so later
- * agent-signed execution PTBs can reference it.
+ * Agent setup (agent-signed, one PTB): acquire DBUSDC by swapping SUI on the
+ * SUI/DBUSDC pool (DBUSDC mint is permissioned on testnet), create a
+ * BalanceManager, deposit the DBUSDC, and share the manager so later
+ * agent-signed execution PTBs can reference it. Leftover SUI/DEEP go back to
+ * the agent. A zero DEEP coin covers fees on input-fee pools.
  */
-export function buildAgentSetupTx({ dbusdcAmount }) {
+export function buildAgentSetupTx({ suiInMist, agentAddress }) {
   const tx = new Transaction()
-  const [coin] = tx.moveCall({
-    target: `${DBUSDC_PKG}::DBUSDC::mint`,
-    arguments: [tx.pure.u64(BigInt(dbusdcAmount))],
+  const pool = DB.pools.SUI_DBUSDC
+  const [suiIn] = tx.splitCoins(tx.gas, [tx.pure.u64(BigInt(suiInMist))])
+  const [deepZero] = tx.moveCall({ target: '0x2::coin::zero', typeArguments: [DEEP_TYPE] })
+  // returns (Coin<Base=SUI>, Coin<Quote=DBUSDC>, Coin<DEEP>)
+  const [baseLeft, dbusdc, deepLeft] = tx.moveCall({
+    target: `${DB.package_id}::pool::swap_exact_base_for_quote`,
+    typeArguments: [pool.base, DB.dbusdc_coin_type],
+    arguments: [tx.object(pool.pool_id), suiIn, deepZero, tx.pure.u64(0n), tx.object('0x6')],
   })
   const [bm] = tx.moveCall({ target: `${DB.package_id}::balance_manager::new` })
   tx.moveCall({
     target: `${DB.package_id}::balance_manager::deposit`,
     typeArguments: [DB.dbusdc_coin_type],
-    arguments: [bm, coin],
+    arguments: [bm, dbusdc],
   })
   tx.moveCall({
     target: '0x2::transfer::public_share_object',
     typeArguments: [`${DB.package_id}::balance_manager::BalanceManager`],
     arguments: [bm],
   })
+  tx.transferObjects([baseLeft, deepLeft], tx.pure.address(agentAddress))
   return tx
 }
 

@@ -10,9 +10,11 @@
     "action_deepbook_rescue": 1
   },
   "agent": {
-    "_comment": "MVP: team-controlled address doubles as deployer + agent. Its signing key must live only as a Worker secret in production.",
-    "address": "0xb908f724ae9fd9f3859df7b42d1192649217bc4a677c99b58ec838db2ff6ec41",
-    "passport_id": "0x24e372f6d31ba611fa4d8112575084d8f9098d29f2e413abd4e11c46847a619c"
+    "_comment": "Dedicated agent key (worker/.dev.vars AGENT_KEY), separate from owner per spec §2. BalanceManager created but UNFUNDED: DBUSDC mint is permissioned and SUI_DBUSDC pool illiquid, so live execution is blocked pending an external DBUSDC source.",
+    "address": "0x9eeed099a0ff576571ffdb5c494db31a3ab2f6c2c76511a778ce5d3952c2ee43",
+    "passport_id": "0x0e74210070407a51cd7ed3721c7ce859a0340a52e94100a0829d05420dff8e6b",
+    "balance_manager_id": "0x2e2e818f16f71f488384bb60e1d0e09c8c9cc8e211f006caba7d577cadeaaec2",
+    "prev_agent_address": "0xb908f724ae9fd9f3859df7b42d1192649217bc4a677c99b58ec838db2ff6ec41"
   },
   "movegate": {
     "package_id_original": "0xec91e604714e263ad43723d43470f236607bd0b13f64731aad36b00a61cf884a",

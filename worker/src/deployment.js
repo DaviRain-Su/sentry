@@ -13,8 +13,13 @@ export default {
     action_deepbook_rescue: 1,
   },
   agent: {
-    address: '0xb908f724ae9fd9f3859df7b42d1192649217bc4a677c99b58ec838db2ff6ec41',
-    passport_id: '0x24e372f6d31ba611fa4d8112575084d8f9098d29f2e413abd4e11c46847a619c',
+    // dedicated agent key (worker/.dev.vars AGENT_KEY); separate from owner per spec §2
+    address: '0x9eeed099a0ff576571ffdb5c494db31a3ab2f6c2c76511a778ce5d3952c2ee43',
+    passport_id: '0x0e74210070407a51cd7ed3721c7ce859a0340a52e94100a0829d05420dff8e6b',
+    balance_manager_id: '0x2e2e818f16f71f488384bb60e1d0e09c8c9cc8e211f006caba7d577cadeaaec2',
+    // NOTE: BalanceManager is created but UNFUNDED — DBUSDC mint is permissioned
+    // on testnet and the SUI_DBUSDC pool is illiquid (swap yields 0), so live
+    // execution dry-run is blocked pending an external DBUSDC source.
   },
   movegate: {
     package_id_original: '0xec91e604714e263ad43723d43470f236607bd0b13f64731aad36b00a61cf884a',
@@ -27,7 +32,9 @@ export default {
   },
   deepbook: {
     package_id: '0xfb28c4cbc6865bd1c897d26aecbe1f8792d1509a20ffec692c800660cbec6982',
+    package_id_latest: '0x22be4cade64bf2d02412c7e8d0e8beea2f78828b948118d46735315409371a3c',
     dbusdc_coin_type: '0xf7152c05930480cd740d7311b5b8b45c6f488e3a53a11c3f74a6fac36a52e0d7::DBUSDC::DBUSDC',
+    deep_coin_type: '0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP',
     pools: {
       SUI_DBUSDC: { pool_id: '0x1c19362ca52b8ffd7a33cee805a67d40f31e6ba303753fd3a4cfdfacea7163a5', base: '0x2::sui::SUI', base_decimals: 9, quote_decimals: 6 },
       DEEP_DBUSDC: { pool_id: '0xe86b991f8632217505fd859445f9803967ac84a9d4a1219065bf191fcb74b622', base: '0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP', base_decimals: 6, quote_decimals: 6 },
