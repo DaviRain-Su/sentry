@@ -101,7 +101,7 @@ export function Dashboard({ state }) {
       )}
 
       {/* KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+      <div className="rg-kpi">
         <StatCard label="Portfolio value" value={`$${fmtUsd(animTotal)}`} icon="wallet"
           sub={{ text: `${p.chg24h > 0 ? '+' : ''}${p.chg24h}% · 24h`, color: p.chg24h < 0 ? 'var(--danger)' : 'var(--safe)' }} />
         <StatCard label="Free budget" value={`$${fmtUsd(p.available, 0)}`} icon="coin" accent="var(--accent)"
@@ -116,7 +116,7 @@ export function Dashboard({ state }) {
       </div>
 
       {/* main grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 18, alignItems: 'start' }}>
+      <div className="rg-dashgrid">
         {/* left */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div className="card" style={{ paddingBottom: 8 }}>

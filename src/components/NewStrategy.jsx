@@ -221,7 +221,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
+          <div className="rg-2col" style={{ alignItems: 'start' }}>
             {/* PTB preview */}
             <div className="card" style={{ overflow: 'hidden' }}>
               <div className="card-hd" style={{ paddingBottom: 12 }}>
@@ -352,7 +352,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
           <div className="card" style={{ padding: 24 }}>
             <h2 className="display" style={{ fontSize: 19, fontWeight: 600, marginBottom: 4 }}>Where should the agent run?</h2>
             <p style={{ color: 'var(--t1)', fontSize: 13.5, marginBottom: 18 }}>Both modes enforce the same on-chain policy. Choose where the decision logic lives.</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div className="rg-2col">
               {[
                 { id: 'local', icon: 'cpu', t: 'Local-first', s: 'Your own LLM (Ollama / Claude Desktop). Decision logic never leaves your machine — maximum privacy.', tags: ['private', 'BYO LLM'] },
                 { id: 'cloud', icon: 'cloud', t: 'Cloud', s: 'Cloudflare Worker + Durable Objects keep watching 24/7, even when your laptop is closed.', tags: ['always-on', 'zero-setup'] },

@@ -26,13 +26,13 @@ const TWEAK_DEFAULTS = {
 
 function NavItem({ icon, label, active, onClick, badge }) {
   return (
-    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 13px',
+    <button onClick={onClick} className="rg-navitem" style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 13px',
       borderRadius: 'var(--r-md)', border: 'none', cursor: 'pointer', textAlign: 'left', position: 'relative',
       background: active ? 'var(--glass-hi)' : 'transparent', color: active ? 'var(--t0)' : 'var(--t1)',
       fontFamily: 'var(--f-body)', fontSize: 13.5, fontWeight: active ? 600 : 500, transition: 'all .14s' }}>
       {active && <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 18, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent-glow)' }} />}
       <span style={{ color: active ? 'var(--accent)' : 'var(--t2)' }}><Icon name={icon} size={18} /></span>
-      <span style={{ flex: 1 }}>{label}</span>
+      <span className="rg-navlabel" style={{ flex: 1 }}>{label}</span>
       {badge != null && <span className="badge badge-accent" style={{ fontSize: 9.5, padding: '2px 7px' }}>{badge}</span>}
     </button>
   )
@@ -288,7 +288,7 @@ export default function App() {
       <div className="app-bg"></div>
       <div style={{ display: 'flex', height: '100vh', position: 'relative', zIndex: 1 }}>
         {/* sidebar */}
-        <aside style={{ width: 'var(--sidebar-w)', flexShrink: 0, borderRight: '1px solid var(--border)',
+        <aside className="rg-sidebar" style={{ width: 'var(--sidebar-w)', flexShrink: 0, borderRight: '1px solid var(--border)',
           display: 'flex', flexDirection: 'column', padding: '20px 16px', background: 'rgba(8,11,17,0.6)', backdropFilter: 'blur(10px)' }}>
           <div style={{ padding: '0 8px 8px', cursor: 'pointer' }} onClick={() => setPhase('landing')}><Logo /></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 18 }}>
@@ -298,13 +298,13 @@ export default function App() {
             <NavItem icon="shield" label="Policies" active={view === 'policies'} onClick={() => setView('policies')} />
           </div>
           <button className="btn btn-primary" style={{ marginTop: 18, justifyContent: 'center' }} onClick={() => setView('new')}>
-            <Icon name="plus" size={16} stroke={2.4} /> New strategy
+            <Icon name="plus" size={16} stroke={2.4} /> <span className="rg-navlabel">New strategy</span>
           </button>
 
           <div style={{ flex: 1 }} />
 
           {/* mode + agent toggle */}
-          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+          <div className="card rg-agentcard" style={{ padding: 14, marginBottom: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <span className="eyebrow">Agent</span>
               <button onClick={() => setAgentOn(v => !v)} style={{ width: 38, height: 22, borderRadius: 100, border: 'none', cursor: 'pointer', position: 'relative',
@@ -333,11 +333,11 @@ export default function App() {
           {/* emergency circuit breaker */}
           {halted ? (
             <button className="btn btn-primary" style={{ marginBottom: 12, justifyContent: 'center' }} onClick={resumeAgents}>
-              <Icon name="refresh" size={15} /> Resume agents
+              <Icon name="refresh" size={15} /> <span className="rg-navlabel">Resume agents</span>
             </button>
           ) : (
             <button className="btn btn-danger" style={{ marginBottom: 12, justifyContent: 'center' }} onClick={emergencyStop}>
-              <Icon name="alert" size={15} /> Emergency stop
+              <Icon name="alert" size={15} /> <span className="rg-navlabel">Emergency stop</span>
             </button>
           )}
 
@@ -345,7 +345,7 @@ export default function App() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', borderTop: '1px solid var(--border)' }}>
             <div style={{ width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(135deg,#2EE6CE,#5AA6FF)', color: '#06231f',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{RG.user.avatar}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="rg-userblock" style={{ flex: 1, minWidth: 0 }}>
               <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ownerShort}</div>
               <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{liveMode ? 'zkLogin · testnet' : RG.user.provider}</div>
             </div>
@@ -364,7 +364,7 @@ export default function App() {
             </div>
 
             {/* price ticker */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, paddingRight: 20, borderRight: '1px solid var(--border)' }}>
+            <div className="rg-ticker" style={{ display: 'flex', alignItems: 'center', gap: 16, paddingRight: 20, borderRight: '1px solid var(--border)' }}>
               {['SUI', 'DEEP'].map(s => {
                 const pr = RG.prices[s]
                 const isSui = s === 'SUI'

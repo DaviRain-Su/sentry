@@ -173,7 +173,7 @@ export function PoliciesView({ policies, onRevoke, onInspect }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="rg-2col">
         {policies.map(p => <PolicyCard key={p.id} p={p} onRevoke={onRevoke} onInspect={onInspect} />)}
       </div>
     </div>

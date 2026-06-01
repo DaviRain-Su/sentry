@@ -237,3 +237,29 @@ body {
 }
 textarea::placeholder { color: var(--t3); }
 textarea:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--accent-dim); }
+
+/* ---------- responsive layout ---------- */
+/* Grid templates live here (not inline) so media queries can reflow them. */
+.rg-kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.rg-dashgrid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 18px; align-items: start; }
+.rg-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+
+@media (max-width: 1100px) {
+  .rg-dashgrid { grid-template-columns: 1fr; }
+}
+@media (max-width: 880px) {
+  .rg-kpi { grid-template-columns: repeat(2, 1fr); }
+  .rg-2col { grid-template-columns: 1fr; }
+  .rg-ticker { display: none !important; }
+  :root { --sidebar-w: 188px; }
+}
+@media (max-width: 560px) {
+  .rg-kpi { grid-template-columns: 1fr; }
+  /* collapse the sidebar to an icon rail */
+  :root { --sidebar-w: 62px; }
+  .rg-sidebar { padding: 16px 8px !important; }
+  .rg-sidebar .eyebrow, .rg-navlabel, .rg-userblock, .rg-agentcard { display: none !important; }
+  .rg-sidebar .btn { justify-content: center !important; padding-left: 0 !important; padding-right: 0 !important; }
+  .rg-navitem { justify-content: center !important; }
+  .rg-navitem .badge { display: none !important; }
+}
