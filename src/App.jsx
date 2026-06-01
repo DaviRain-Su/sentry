@@ -1,0 +1,413 @@
+/* ===========================================================
+   RescueGrid — app shell, navigation, crash orchestration
+   =========================================================== */
+import { useState, useEffect, useRef } from 'react'
+import { RG } from './data.js'
+import { Icon, Logo, Token, hexToRgba } from './components/primitives.jsx'
+import { Landing } from './components/Landing.jsx'
+import { ZkLogin } from './components/ZkLogin.jsx'
+import { Dashboard } from './components/Dashboard.jsx'
+import { NewStrategy } from './components/NewStrategy.jsx'
+import { ActivityView, PoliciesView } from './components/Views.jsx'
+import { PolicyInspect, TxDrawer } from './components/Detail.jsx'
+import { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle } from './components/TweaksPanel.jsx'
+
+const BASE_SPARK = [4.61,4.58,4.55,4.59,4.52,4.48,4.51,4.44,4.40,4.43,4.38,4.31,4.27,4.30,4.24,4.19,4.182]
+const CRASH_TAIL = [4.10,3.96,3.84,3.71,3.79]
+
+const TWEAK_DEFAULTS = {
+  accent: '#2EE6CE',
+  crashSeverity: 'severe',
+  liveJitter: true,
+}
+
+function NavItem({ icon, label, active, onClick, badge }) {
+  return (
+    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 13px',
+      borderRadius: 'var(--r-md)', border: 'none', cursor: 'pointer', textAlign: 'left', position: 'relative',
+      background: active ? 'var(--glass-hi)' : 'transparent', color: active ? 'var(--t0)' : 'var(--t1)',
+      fontFamily: 'var(--f-body)', fontSize: 13.5, fontWeight: active ? 600 : 500, transition: 'all .14s' }}>
+      {active && <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 18, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent-glow)' }} />}
+      <span style={{ color: active ? 'var(--accent)' : 'var(--t2)' }}><Icon name={icon} size={18} /></span>
+      <span style={{ flex: 1 }}>{label}</span>
+      {badge != null && <span className="badge badge-accent" style={{ fontSize: 9.5, padding: '2px 7px' }}>{badge}</span>}
+    </button>
+  )
+}
+
+export default function App() {
+  const [phase, setPhase] = useState('landing')   // landing | app
+  const [authed, setAuthed] = useState(false)
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS)
+  const [view, setView] = useState('dashboard')
+  const [inspect, setInspect] = useState(null)
+  const [txView, setTxView] = useState(null)
+  const [mode, setMode] = useState('cloud')
+  const [agentOn, setAgentOn] = useState(true)
+  const [crashState, setCrashState] = useState('idle')
+  const [risk, setRisk] = useState(38)
+  const [suiPrice, setSuiPrice] = useState(4.182)
+  const [suiSpark, setSuiSpark] = useState(BASE_SPARK)
+  const [activity, setActivity] = useState(RG.activity)
+  const [policies, setPolicies] = useState(RG.policies)
+  const [toast, setToast] = useState(null)
+  const [halted, setHalted] = useState(false)
+  const [notifs, setNotifs] = useState(RG.notifications)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const prevStatuses = useRef(null)
+  const timers = useRef([])
+  const notifId = useRef(100)
+
+  // toggle landing scroll-mode on <html>/<body> so the dashboard's fixed
+  // layout and the scrollable landing page can coexist in one SPA.
+  useEffect(() => {
+    const on = phase === 'landing'
+    document.documentElement.classList.toggle('lp-mode', on)
+    document.body.classList.toggle('lp-mode', on)
+    return () => {
+      document.documentElement.classList.remove('lp-mode')
+      document.body.classList.remove('lp-mode')
+    }
+  }, [phase])
+
+  // apply accent tweak to CSS vars
+  useEffect(() => {
+    const root = document.documentElement
+    root.style.setProperty('--accent', t.accent)
+    root.style.setProperty('--accent-dim', hexToRgba(t.accent, 0.14))
+    root.style.setProperty('--accent-glow', hexToRgba(t.accent, 0.45))
+  }, [t.accent])
+
+  // gentle live jitter when idle
+  useEffect(() => {
+    if (phase !== 'app' || crashState !== 'idle' || !t.liveJitter) return
+    const iv = setInterval(() => {
+      setSuiPrice(p => +(4.182 + (Math.random() - 0.5) * 0.012).toFixed(3))
+      setRisk(r => Math.max(34, Math.min(42, r + (Math.random() - 0.5) * 1.6)))
+    }, 2200)
+    return () => clearInterval(iv)
+  }, [phase, crashState, t.liveJitter])
+
+  const showToast = (msg, c) => { setToast({ msg, c }); setTimeout(() => setToast(null), 2600) }
+  const pushNotif = (kind, title) => setNotifs(n => [{ id: ++notifId.current, kind, title, time: 'now', read: false }, ...n])
+  const unread = notifs.filter(n => !n.read).length
+
+  const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = [] }
+  const after = (ms, fn) => timers.current.push(setTimeout(fn, ms))
+
+  const simulateCrash = () => {
+    clearTimers()
+    setView('dashboard')
+    setCrashState('crashing')
+    const severe = t.crashSeverity === 'severe'
+    const rk = severe ? 5 : 2.6       // risk ramp per step
+    const pr = severe ? 0.09 : 0.05   // price drop per step
+    // ramp risk + drop price over ~2.4s
+    let step = 0
+    const ramp = setInterval(() => {
+      step++
+      setRisk(38 + step * rk)
+      setSuiPrice(+(4.182 - step * pr).toFixed(3))
+      if (step >= 9) clearInterval(ramp)
+    }, 240)
+    timers.current.push(ramp)
+    after(900, () => setSuiSpark([...BASE_SPARK, ...CRASH_TAIL.slice(0, 3)]))
+
+    // agent decides to rescue
+    after(2600, () => {
+      setCrashState('rescuing')
+      setRisk(severe ? 70 : 54)
+      setSuiSpark([...BASE_SPARK, ...CRASH_TAIL])
+    })
+    // stream rescue executions
+    after(3300, () => {
+      setActivity(a => [{ t: '14:31:02', date: 'Today', kind: 'monitor', policy: 'SUI Crash Rescue Grid', title: 'Trigger condition met · SUI −8.4%', detail: 'Reference −8% breached. Agent authorized by policy to deploy rescue grid.', amount: 0, tx: null, risk: 82, mode }, ...a])
+    })
+    after(4200, () => {
+      setActivity(a => [{ t: '14:31:05', date: 'Today', kind: 'exec', policy: 'SUI Crash Rescue Grid', title: 'Rung #1 partial fill · 14.3 SUI @ 3.85', detail: 'Book thinned mid-fill (60%) · agent re-quoting remainder on Deepbook', amount: -55.0, tx: '0xe1f4…7c33', risk: 70, mode }, ...a])
+      setRisk(64)
+    })
+    after(4750, () => {
+      setActivity(a => [{ t: '14:31:07', date: 'Today', kind: 'retry', policy: 'SUI Crash Rescue Grid', title: 'Rung #1 remainder filled on retry · 9.6 SUI @ 3.86', detail: 'Re-quote succeeded · slippage 0.8% · budget check passed', amount: -37.0, tx: '0x3da9…6b22', risk: 62, mode }, ...a])
+      setRisk(60)
+    })
+    after(5100, () => {
+      setActivity(a => [{ t: '14:31:09', date: 'Today', kind: 'exec', policy: 'SUI Crash Rescue Grid', title: 'Bought 24.6 SUI @ 3.74', detail: 'Rescue rung #2 filled on Deepbook · slippage 0.9% · 184 / 500 USDC used', amount: -92.0, tx: '0x9a02…b418', risk: 58, mode }, ...a])
+      setRisk(52)
+    })
+    after(6000, () => {
+      setActivity(a => [{ t: '14:31:12', date: 'Today', kind: 'policy', policy: 'SUI Crash Rescue Grid', title: 'Activity logged on-chain', detail: 'Agent execution record committed · 2 fills · 184 USDC spent of 500 cap', amount: 0, tx: '0x55cd…2e19', risk: null, mode }, ...a])
+      setCrashState('rescued')
+      setRisk(46)
+      setSuiPrice(3.79)
+      setPolicies(ps => ps.map(p => p.strategy === 'rescue-grid' ? { ...p, budgetUsed: 184, execs: p.execs + 2 } : p))
+      showToast('Rescue complete — agent acted within policy, no signature needed', 'var(--safe)')
+      pushNotif('exec', 'Rescue complete · 184/500 USDC used, budget intact')
+    })
+  }
+
+  const resetDemo = () => {
+    clearTimers()
+    setCrashState('idle'); setRisk(38); setSuiPrice(4.182); setSuiSpark(BASE_SPARK)
+    setActivity(RG.activity); setPolicies(RG.policies)
+  }
+
+  const handleRevoke = (id) => {
+    setPolicies(ps => ps.filter(p => p.id !== id))
+    showToast('Policy revoked on-chain — agent authority deleted', 'var(--danger)')
+    pushNotif('policy', 'Policy revoked on-chain')
+  }
+
+  const emergencyStop = () => {
+    clearTimers()
+    prevStatuses.current = policies.map(p => ({ id: p.id, status: p.status }))
+    setHalted(true)
+    setAgentOn(false)
+    setCrashState('idle')
+    setPolicies(ps => ps.map(p => ({ ...p, status: 'paused' })))
+    setActivity(a => [{ t: '14:33:00', date: 'Today', kind: 'guardian', policy: 'All policies', title: 'Emergency stop triggered by owner', detail: 'Global circuit breaker engaged · every agent policy frozen on-chain · no further execution permitted', amount: 0, tx: '0xkill…stop', risk: null, mode }, ...a])
+    showToast('Emergency stop — all agents frozen on-chain', 'var(--danger)')
+    pushNotif('guardian', 'Emergency stop engaged · all agents halted')
+  }
+
+  const resumeAgents = () => {
+    const prev = prevStatuses.current
+    setHalted(false)
+    setAgentOn(true)
+    setPolicies(ps => ps.map(p => {
+      const was = prev && prev.find(x => x.id === p.id)
+      return { ...p, status: was ? was.status : 'active' }
+    }))
+    showToast('Agents resumed — policies restored to prior state', 'var(--accent)')
+  }
+
+  const deployPolicy = (meta = { name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', budget: 500, scope: 'SUI/USDC', slip: 1.2 }) => {
+    const np = { id: '0x' + Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6),
+      name: meta.name, strategy: meta.strategy, status: 'active', mode, budgetCap: meta.budget, budgetUsed: 0,
+      scope: [meta.scope], maxSlippage: meta.slip, expires: '2026-06-14T00:00:00Z', created: '2026-06-01', execs: 0 }
+    setPolicies(ps => [np, ...ps])
+    setActivity(a => [{ t: '14:28:40', date: 'Today', kind: 'policy', policy: np.name, title: 'Policy Object created', detail: `Budget ${meta.budget} USDC · scope ${meta.scope} · ${mode} mode · expires Jun 14`, amount: 0, tx: '0x' + Math.random().toString(16).slice(2,6) + '…' + Math.random().toString(16).slice(2,6), risk: null, mode }, ...a])
+    showToast('Policy deployed — agent is now autonomous within limits', 'var(--accent)')
+    pushNotif('policy', `Policy deployed · ${meta.name}`)
+    setView('policies')
+  }
+
+  const state = { risk, suiPrice, suiSpark, crashState, mode, agentOn, activity }
+
+  if (phase === 'landing') return <Landing onLaunch={() => setPhase('app')} />
+  if (!authed) return (
+    <>
+      <div className="app-bg"></div>
+      <ZkLogin onAuth={() => setAuthed(true)} onBackToLanding={() => setPhase('landing')} />
+    </>
+  )
+
+  const titles = {
+    dashboard: { t: 'Command center', s: 'Live portfolio, risk and autonomous agent activity' },
+    new: { t: 'New strategy', s: 'Turn natural language into a safe, autonomous agent policy' },
+    activity: { t: 'Agent activity', s: 'Every autonomous decision and on-chain execution' },
+    policies: { t: 'Policies', s: 'The on-chain authority you grant the agent' },
+  }
+
+  return (
+    <>
+      <div className="app-bg"></div>
+      <div style={{ display: 'flex', height: '100vh', position: 'relative', zIndex: 1 }}>
+        {/* sidebar */}
+        <aside style={{ width: 'var(--sidebar-w)', flexShrink: 0, borderRight: '1px solid var(--border)',
+          display: 'flex', flexDirection: 'column', padding: '20px 16px', background: 'rgba(8,11,17,0.6)', backdropFilter: 'blur(10px)' }}>
+          <div style={{ padding: '0 8px 8px', cursor: 'pointer' }} onClick={() => setPhase('landing')}><Logo /></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 18 }}>
+            <div className="eyebrow" style={{ padding: '0 13px 8px' }}>Workspace</div>
+            <NavItem icon="dashboard" label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+            <NavItem icon="activity" label="Agent activity" active={view === 'activity'} onClick={() => setView('activity')} badge={activity.length} />
+            <NavItem icon="shield" label="Policies" active={view === 'policies'} onClick={() => setView('policies')} />
+          </div>
+          <button className="btn btn-primary" style={{ marginTop: 18, justifyContent: 'center' }} onClick={() => setView('new')}>
+            <Icon name="plus" size={16} stroke={2.4} /> New strategy
+          </button>
+
+          <div style={{ flex: 1 }} />
+
+          {/* mode + agent toggle */}
+          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span className="eyebrow">Agent</span>
+              <button onClick={() => setAgentOn(v => !v)} style={{ width: 38, height: 22, borderRadius: 100, border: 'none', cursor: 'pointer', position: 'relative',
+                background: agentOn ? 'var(--accent)' : 'var(--glass-hi)', transition: 'all .18s' }}>
+                <div style={{ position: 'absolute', top: 2, left: agentOn ? 18 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'all .18s' }} />
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 6, background: 'var(--bg-0)', borderRadius: 'var(--r-sm)', padding: 4 }}>
+              {[{ id: 'local', icon: 'cpu', l: 'Local' }, { id: 'cloud', icon: 'cloud', l: 'Cloud' }].map(m => (
+                <button key={m.id} onClick={() => setMode(m.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: '7px 0', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'var(--f-body)', fontSize: 12, fontWeight: 600,
+                  background: mode === m.id ? 'var(--glass-hi)' : 'transparent', color: mode === m.id ? 'var(--accent)' : 'var(--t2)', transition: 'all .14s' }}>
+                  <Icon name={m.icon} size={14} /> {m.l}
+                </button>
+              ))}
+            </div>
+            {/* gas sponsorship note */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, padding: '9px 10px', borderRadius: 'var(--r-sm)', background: 'var(--glass)' }}>
+              <span style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }}><Icon name="bolt" size={14} /></span>
+              <div style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--t1)' }}>
+                Gas is <strong style={{ color: 'var(--t0)' }}>sponsored</strong> — the agent pays fees from a gas station, so it acts without SUI of its own.
+              </div>
+            </div>
+          </div>
+
+          {/* emergency circuit breaker */}
+          {halted ? (
+            <button className="btn btn-primary" style={{ marginBottom: 12, justifyContent: 'center' }} onClick={resumeAgents}>
+              <Icon name="refresh" size={15} /> Resume agents
+            </button>
+          ) : (
+            <button className="btn btn-danger" style={{ marginBottom: 12, justifyContent: 'center' }} onClick={emergencyStop}>
+              <Icon name="alert" size={15} /> Emergency stop
+            </button>
+          )}
+
+          {/* user */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', borderTop: '1px solid var(--border)' }}>
+            <div style={{ width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(135deg,#2EE6CE,#5AA6FF)', color: '#06231f',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{RG.user.avatar}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{RG.user.handle}</div>
+              <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{RG.user.provider}</div>
+            </div>
+            <span style={{ color: 'var(--t2)', cursor: 'pointer' }} onClick={() => { setAuthed(false); setPhase('landing') }}><Icon name="logout" size={16} /></span>
+          </div>
+        </aside>
+
+        {/* main */}
+        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {/* topbar */}
+          <header style={{ height: 'var(--topbar-h)', flexShrink: 0, borderBottom: '1px solid var(--border)', display: 'flex',
+            alignItems: 'center', padding: '0 26px', gap: 20, background: 'rgba(8,11,17,0.5)', backdropFilter: 'blur(10px)' }}>
+            <div style={{ flex: 1 }}>
+              <h1 className="display" style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{titles[view].t}</h1>
+              <div style={{ fontSize: 11.5, color: 'var(--t2)' }}>{titles[view].s}</div>
+            </div>
+
+            {/* price ticker */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, paddingRight: 20, borderRight: '1px solid var(--border)' }}>
+              {['SUI', 'DEEP'].map(s => {
+                const pr = RG.prices[s]
+                const isSui = s === 'SUI'
+                const price = isSui ? suiPrice : pr.usd
+                const chg = isSui && crashState !== 'idle' ? -8.42 : pr.chg
+                return (
+                  <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <Token sym={s} size={20} />
+                    <div>
+                      <div className="mono" style={{ fontSize: 12.5, fontWeight: 600 }}>${isSui ? price.toFixed(3) : price}</div>
+                      <div className="mono" style={{ fontSize: 10, fontWeight: 600, color: chg < 0 ? 'var(--danger)' : 'var(--safe)' }}>{chg > 0 ? '+' : ''}{chg}%</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* notifications */}
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => { setNotifOpen(o => !o); if (!notifOpen) setNotifs(n => n.map(x => ({ ...x, read: true }))) }}
+                className="btn btn-sm btn-ghost" style={{ padding: 9, position: 'relative' }}>
+                <Icon name="alert" size={17} />
+                {unread > 0 && <span style={{ position: 'absolute', top: 3, right: 3, minWidth: 15, height: 15, padding: '0 4px', borderRadius: 100,
+                  background: 'var(--danger)', color: '#fff', fontSize: 9.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--f-mono)' }}>{unread}</span>}
+              </button>
+              {notifOpen && (
+                <>
+                  <div onClick={() => setNotifOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                  <div className="card fade-up" style={{ position: 'absolute', top: 44, right: 0, width: 320, zIndex: 61, padding: 0, overflow: 'hidden', boxShadow: '0 20px 50px -16px rgba(0,0,0,0.6)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+                      <span className="card-title">Notifications</span>
+                      <span className="badge badge-neutral" style={{ fontSize: 9.5 }}>{notifs.length}</span>
+                    </div>
+                    <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+                      {notifs.map(n => {
+                        const nm = { exec: ['var(--accent)', 'bolt'], guardian: ['var(--danger)', 'shield'], retry: ['var(--warn)', 'refresh'], policy: ['var(--sui)', 'grid'] }[n.kind] || ['var(--t1)', 'eye']
+                        return (
+                          <div key={n.id} style={{ display: 'flex', gap: 11, padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+                            <span style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              background: hexToRgba(nm[0] === 'var(--t1)' ? '#9DABBA' : ({ 'var(--accent)': t.accent, 'var(--danger)': '#FF5470', 'var(--warn)': '#FFC24B', 'var(--sui)': '#5AA6FF' }[nm[0]] || '#9DABBA'), 0.16), color: nm[0] }}>
+                              <Icon name={nm[1]} size={13} /></span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.35 }}>{n.title}</div>
+                              <div style={{ fontSize: 10.5, color: 'var(--t2)', marginTop: 2 }}>{n.time}</div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* demo controls */}
+            {crashState === 'idle' ? (
+              <button className="btn btn-sm" onClick={simulateCrash} disabled={halted}
+                style={{ borderColor: 'var(--danger)', color: 'var(--danger)', background: 'var(--danger-dim)', opacity: halted ? 0.4 : 1 }}>
+                <Icon name="alert" size={14} /> Simulate flash crash
+              </button>
+            ) : (
+              <button className="btn btn-sm btn-ghost" onClick={resetDemo}>
+                <Icon name="refresh" size={14} /> Reset demo
+              </button>
+            )}
+          </header>
+
+          {/* scroll body */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px 26px 60px' }}>
+            {halted && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderRadius: 'var(--r-lg)', marginBottom: 18,
+                background: 'var(--danger-dim)', border: '1px solid rgba(255,84,112,0.45)' }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--danger)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon name="alert" size={20} stroke={2.2} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div className="display" style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--danger)' }}>Circuit breaker engaged — all agents halted</div>
+                  <div style={{ fontSize: 12.5, color: 'var(--t1)', marginTop: 1 }}>Every policy is frozen on-chain. No agent can execute until you resume — your funds and limits are untouched.</div>
+                </div>
+                <button className="btn btn-sm" onClick={resumeAgents} style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)' }}>
+                  <Icon name="refresh" size={13} /> Resume
+                </button>
+              </div>
+            )}
+            {view === 'dashboard' && <Dashboard state={state} />}
+            {view === 'new' && <NewStrategy mode={mode} setMode={setMode} onDone={deployPolicy} />}
+            {view === 'activity' && <ActivityView activity={activity} onTx={setTxView} />}
+            {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} />}
+          </div>
+        </main>
+
+        {inspect && <PolicyInspect p={inspect} activity={activity} onClose={() => setInspect(null)} onRevoke={handleRevoke} onTx={setTxView} />}
+        {txView && <TxDrawer tx={txView} onClose={() => setTxView(null)} />}
+
+        {/* toast */}
+        {toast && (
+          <div className="fade-up" style={{ position: 'fixed', bottom: 26, left: '50%', transform: 'translateX(-50%)', zIndex: 100,
+            display: 'flex', alignItems: 'center', gap: 11, padding: '13px 20px', borderRadius: 'var(--r-lg)',
+            background: 'var(--bg-3)', border: `1px solid ${toast.c}`, boxShadow: `0 12px 40px -10px ${toast.c}80` }}>
+            <span style={{ color: toast.c }}><Icon name="check" size={17} stroke={2.4} /></span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{toast.msg}</span>
+          </div>
+        )}
+
+        <TweaksPanel>
+          <TweakSection label="Theme" />
+          <TweakColor label="Accent" value={t.accent}
+            options={['#2EE6CE', '#5AA6FF', '#A78BFA', '#FFC24B', '#FF7A8A']}
+            onChange={(v) => setTweak('accent', v)} />
+          <TweakSection label="Demo" />
+          <TweakRadio label="Crash severity" value={t.crashSeverity}
+            options={['mild', 'severe']}
+            onChange={(v) => setTweak('crashSeverity', v)} />
+          <TweakToggle label="Live market jitter" value={t.liveJitter}
+            onChange={(v) => setTweak('liveJitter', v)} />
+        </TweaksPanel>
+      </div>
+    </>
+  )
+}
