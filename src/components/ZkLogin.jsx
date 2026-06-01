@@ -15,14 +15,21 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
   const { mutate: connect } = useConnectWallet()
   const account = useCurrentAccount()
 
-  // Real zkLogin: once a Sui account is connected, we're authed.
+  // Any connected Sui account (standard wallet or Enoki zkLogin) = authed.
   useEffect(() => {
-    if (ENOKI_CONFIGURED && account) onAuth(account.address)
+    if (account) onAuth(account.address)
   }, [account, onAuth])
 
   const enokiByProvider = {}
   if (ENOKI_CONFIGURED) {
     for (const w of wallets) if (isEnokiWallet(w)) enokiByProvider[w.provider] = w
+  }
+  // standard Sui wallets (Slush, Sui Wallet, …) — no credentials needed
+  const standardWallets = wallets.filter(w => !isEnokiWallet(w))
+
+  const connectWallet = (w) => {
+    setLoading(w.name)
+    connect({ wallet: w }, { onError: () => setLoading(null) })
   }
 
   const go = (providerId) => {
@@ -77,9 +84,34 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 56px' }}>
         <div style={{ maxWidth: 360, margin: '0 auto', width: '100%' }}>
           <h2 className="display" style={{ fontSize: 24, fontWeight: 600 }}>Sign in</h2>
-          <p style={{ fontSize: 13.5, color: 'var(--t1)', marginTop: 8, marginBottom: 28 }}>
-            No seed phrase. No browser extension. zkLogin derives your Sui address from your existing account with a zero-knowledge proof.
+          <p style={{ fontSize: 13.5, color: 'var(--t1)', marginTop: 8, marginBottom: 22 }}>
+            Connect a Sui wallet to authorize on-chain, or use zkLogin. The agent only ever gets a scoped Policy Object — never your account.
           </p>
+
+          {/* primary: Sui wallet — no credentials needed */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+            {standardWallets.length > 0 ? standardWallets.map(w => (
+              <button key={w.name} onClick={() => connectWallet(w)} disabled={!!loading}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', borderRadius: 'var(--r-md)',
+                  border: 'none', background: 'linear-gradient(180deg, var(--accent), #1fc7b1)', color: '#032420', cursor: loading ? 'wait' : 'pointer',
+                  fontFamily: 'var(--f-body)', fontSize: 14, fontWeight: 700, transition: 'all .14s', boxShadow: '0 8px 24px -8px var(--accent-glow)',
+                  opacity: loading && loading !== w.name ? 0.4 : 1 }}>
+                {w.icon && <img src={w.icon} alt="" width={22} height={22} style={{ borderRadius: 6 }} />}
+                {loading === w.name ? <><Icon name="refresh" size={15} style={{ animation: 'spin 1s linear infinite' }} /> Connecting…</> : `Connect ${w.name}`}
+              </button>
+            )) : (
+              <div style={{ display: 'flex', gap: 10, padding: '13px 16px', borderRadius: 'var(--r-md)', border: '1px dashed var(--border-hi)', color: 'var(--t2)', fontSize: 13 }}>
+                <Icon name="wallet" size={18} />
+                <span>No Sui wallet detected. Install <a href="https://slush.app" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>Slush</a> (testnet) and reload.</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '0 0 16px' }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            <span className="eyebrow">or zkLogin</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+          </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {providers.map(p => {
@@ -101,8 +133,12 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
             })}
           </div>
 
-          <div style={{ marginTop: 14, fontSize: 11, color: ENOKI_CONFIGURED ? 'var(--safe)' : 'var(--t2)', fontFamily: 'var(--f-mono)' }}>
-            {ENOKI_CONFIGURED ? '● live zkLogin (Enoki · testnet)' : '○ demo mode — set VITE_ENOKI_API_KEY + VITE_GOOGLE_CLIENT_ID for real zkLogin'}
+          <div style={{ marginTop: 14, fontSize: 11, color: (standardWallets.length > 0 || ENOKI_CONFIGURED) ? 'var(--safe)' : 'var(--t2)', fontFamily: 'var(--f-mono)' }}>
+            {standardWallets.length > 0
+              ? '● Sui wallet ready · testnet — real on-chain sign-in'
+              : ENOKI_CONFIGURED
+                ? '● live zkLogin (Enoki · testnet)'
+                : '○ demo mode — connect a Sui wallet or set Enoki creds for live'}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0' }}>

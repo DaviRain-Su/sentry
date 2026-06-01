@@ -53,13 +53,14 @@ Hit **Simulate flash crash** (top right): SUI drops −8.4%, the risk gauge spik
 
 ## Live mode (real zkLogin + Worker)
 
-By default the app runs **self-contained in demo mode** (mock data, simulated sign-in). To run it against the real Sui Testnet backend, copy `.env.example` → `.env.local` and fill in:
+By default the app runs **self-contained in demo mode** (mock data, simulated sign-in). To run it against the real Sui Testnet backend:
 
-- `VITE_WORKER_URL` — the RescueGrid Worker (`cd worker && npm run dev`, default `http://localhost:8787`).
-- `VITE_ENOKI_API_KEY` — an Enoki **public** API key ([portal.enoki.mystenlabs.com](https://portal.enoki.mystenlabs.com)).
-- `VITE_GOOGLE_CLIENT_ID` — a Google OAuth Web client ID, registered in the Enoki portal with your app origin allowed.
+1. Set `VITE_WORKER_URL` in `.env.local` (`cd worker && npm run dev`, default `http://localhost:8787`).
+2. **Sign in with a Sui wallet** — install [Slush](https://slush.app) (or any standard Sui wallet), switch it to **Testnet**, and grab test SUI from the faucet. No signups, no API keys. The sign-in screen shows a "Connect <wallet>" button.
 
-With these set, "Continue with Google" performs **real zkLogin** (Enoki manages salt/prover/nonce), and **New strategy → Sign & deploy** parses via the Worker, builds the `create_policy` transaction, signs it with your zkLogin account, and registers the policy's agent runtime. Without them, everything still works as a clickable demo.
+With a connected wallet + Worker URL, **New strategy → Sign & deploy** parses via the Worker, builds the `create_policy` transaction, you sign it in your wallet, and the policy's agent runtime is registered — a real on-chain Move Policy Object. Live policy list + on-chain revoke work the same way. (Creating/revoking costs only the ~0.01 SUI MoveGate fee + gas; no DBUSDC needed.)
+
+**zkLogin (optional):** if you'd rather use Google zkLogin, also set `VITE_ENOKI_API_KEY` (Enoki public key from [portal.enoki.mystenlabs.com](https://portal.enoki.mystenlabs.com)) and `VITE_GOOGLE_CLIENT_ID` (Google OAuth Web client, registered in the Enoki portal). Then "Continue with Google" performs real zkLogin. Wallet login needs none of this.
 
 > The agent (autonomous execution) signs with a dedicated key held by the Worker (`worker/.dev.vars`), never your zkLogin key. Live Deepbook execution is gated pending testnet DBUSDC (see `docs/B-feasibility-findings.md`).
 
