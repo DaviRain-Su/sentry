@@ -7,7 +7,6 @@ import { Transaction } from '@mysten/sui/transactions'
 import { RG } from './data.js'
 import { WORKER_CONFIGURED, parseIntent, buildPolicyTx, activatePolicy, listPolicies, buildRevokeTx } from './api.js'
 import { Icon, Logo, Token, hexToRgba } from './components/primitives.jsx'
-import { Landing } from './components/Landing.jsx'
 import { ZkLogin } from './components/ZkLogin.jsx'
 import { Dashboard } from './components/Dashboard.jsx'
 import { NewStrategy } from './components/NewStrategy.jsx'
@@ -38,8 +37,7 @@ function NavItem({ icon, label, active, onClick, badge }) {
   )
 }
 
-export default function App() {
-  const [phase, setPhase] = useState('landing')   // landing | app
+export default function App({ onExit }) {
   const [authed, setAuthed] = useState(false)
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS)
   const [view, setView] = useState('dashboard')
@@ -70,18 +68,6 @@ export default function App() {
   const owner = account?.address || RG.user.addr
   const ownerShort = account ? owner.slice(0, 6) + '…' + owner.slice(-4) : RG.user.handle
 
-  // toggle landing scroll-mode on <html>/<body> so the dashboard's fixed
-  // layout and the scrollable landing page can coexist in one SPA.
-  useEffect(() => {
-    const on = phase === 'landing'
-    document.documentElement.classList.toggle('lp-mode', on)
-    document.body.classList.toggle('lp-mode', on)
-    return () => {
-      document.documentElement.classList.remove('lp-mode')
-      document.body.classList.remove('lp-mode')
-    }
-  }, [phase])
-
   // apply accent tweak to CSS vars
   useEffect(() => {
     const root = document.documentElement
@@ -92,13 +78,13 @@ export default function App() {
 
   // gentle live jitter when idle
   useEffect(() => {
-    if (phase !== 'app' || crashState !== 'idle' || !t.liveJitter) return
+    if (crashState !== 'idle' || !t.liveJitter) return
     const iv = setInterval(() => {
       setSuiPrice(p => +(4.182 + (Math.random() - 0.5) * 0.012).toFixed(3))
       setRisk(r => Math.max(34, Math.min(42, r + (Math.random() - 0.5) * 1.6)))
     }, 2200)
     return () => clearInterval(iv)
-  }, [phase, crashState, t.liveJitter])
+  }, [crashState, t.liveJitter])
 
   const showToast = (msg, c) => { setToast({ msg, c }); setTimeout(() => setToast(null), 2600) }
   const pushNotif = (kind, title) => setNotifs(n => [{ id: ++notifId.current, kind, title, time: 'now', read: false }, ...n])
@@ -268,11 +254,10 @@ export default function App() {
 
   const state = { risk, suiPrice, suiSpark, crashState, mode, agentOn, activity }
 
-  if (phase === 'landing') return <Landing onLaunch={() => setPhase('app')} />
   if (!authed) return (
     <>
       <div className="app-bg"></div>
-      <ZkLogin onAuth={() => setAuthed(true)} onBackToLanding={() => setPhase('landing')} />
+      <ZkLogin onAuth={() => setAuthed(true)} onBackToLanding={onExit} />
     </>
   )
 
@@ -290,7 +275,7 @@ export default function App() {
         {/* sidebar */}
         <aside className="rg-sidebar" style={{ width: 'var(--sidebar-w)', flexShrink: 0, borderRight: '1px solid var(--border)',
           display: 'flex', flexDirection: 'column', padding: '20px 16px', background: 'rgba(8,11,17,0.6)', backdropFilter: 'blur(10px)' }}>
-          <div style={{ padding: '0 8px 8px', cursor: 'pointer' }} onClick={() => setPhase('landing')}><Logo /></div>
+          <div style={{ padding: '0 8px 8px', cursor: 'pointer' }} onClick={onExit}><Logo /></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 18 }}>
             <div className="eyebrow" style={{ padding: '0 13px 8px' }}>Workspace</div>
             <NavItem icon="dashboard" label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
@@ -349,7 +334,7 @@ export default function App() {
               <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ownerShort}</div>
               <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{liveMode ? 'zkLogin · testnet' : RG.user.provider}</div>
             </div>
-            <span style={{ color: 'var(--t2)', cursor: 'pointer' }} onClick={() => { if (account) disconnect(); setAuthed(false); setPhase('landing') }}><Icon name="logout" size={16} /></span>
+            <span style={{ color: 'var(--t2)', cursor: 'pointer' }} onClick={() => { if (account) disconnect(); setAuthed(false); onExit && onExit() }}><Icon name="logout" size={16} /></span>
           </div>
         </aside>
 

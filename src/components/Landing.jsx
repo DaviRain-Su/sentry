@@ -28,6 +28,15 @@ const STEPS = [
 
 export function Landing({ onLaunch }) {
   const rootRef = useRef(null)
+  // landing needs scrollable body; the dashboard uses fixed/overflow-hidden.
+  useEffect(() => {
+    document.documentElement.classList.add('lp-mode')
+    document.body.classList.add('lp-mode')
+    return () => {
+      document.documentElement.classList.remove('lp-mode')
+      document.body.classList.remove('lp-mode')
+    }
+  }, [])
   useEffect(() => {
     const els = rootRef.current ? rootRef.current.querySelectorAll('.reveal') : []
     const io = new IntersectionObserver((entries) => {
