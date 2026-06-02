@@ -1,8 +1,12 @@
 /* Tailwind 4 + HeroUI v3 entry.
-   During the HeroUI migration we deliberately omit Tailwind's preflight (base)
-   layer so the existing hand-rolled neon pages keep their styling until each is
-   rewritten. Once every page is on HeroUI we can switch to the full
-   `@import "tailwindcss";` and drop styles.css. */
+   ARCHITECTURE (intentional, not a migration TODO): HeroUI powers the interactive
+   primitives (Button, Slider, ProgressBar, Card). The neon design system in
+   styles.css styles native HTML directly (.card, .badge, tables, textarea, the
+   sidebar nav + TweaksPanel buttons). We deliberately OMIT Tailwind's preflight
+   (base) layer: preflight resets native element defaults and would flatten the
+   neon presentation. HeroUI ships its own resets scoped to its components, so the
+   two coexist. Do NOT switch to the bare `@import "tailwindcss";` — it pulls in
+   preflight and breaks the neon native elements. */
 @layer theme, base, components, utilities;
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
