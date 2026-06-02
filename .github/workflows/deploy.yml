@@ -1,58 +1,44 @@
-name: Deploy to GitHub Pages
+name: Deploy frontend to Cloudflare Pages
 
+# Auto-deploys the RescueGrid dashboard to Cloudflare Pages on every push to main.
+# CI bakes VITE_WORKER_URL (the deployed Worker) into the build — the local
+# .env.local is gitignored and absent here, so the URL below is the single
+# source of truth for production. Requires two repo secrets:
+#   CLOUDFLARE_API_TOKEN  (token with "Cloudflare Pages: Edit" + "Account: Read")
+#   CLOUDFLARE_ACCOUNT_ID
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+    paths-ignore:
+      - 'worker/**'
+      - '**.md'
+  workflow_dispatch: {}
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: 'pages'
-  cancel-in-progress: false
+  group: cf-pages-deploy
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build
+  deploy:
+    name: Build & deploy
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build for production
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build (demo + live Worker reads)
         run: npm run build
         env:
-          # GitHub Pages 部署到子路径，需要设置 base URL
-          VITE_BASE_URL: '/rescuegrid/'
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+          VITE_WORKER_URL: https://rescuegrid-worker.davirain-yin.workers.dev
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: './dist'
-
-  deploy:
-    name: Deploy
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=rescuegrid --branch=main
