@@ -1,8 +1,9 @@
 /* ===========================================================
    RescueGrid — Activity log + Policy management
    =========================================================== */
-import { useState } from 'react'
-import { Icon, fmtUsd } from './primitives.jsx'
+import { useState, Fragment } from 'react'
+import { RG } from '../data.js'
+import { Icon, fmtUsd, ModeBadge } from './primitives.jsx'
 import { Button, ProgressBar } from '@heroui/react'
 import { PortfolioSummary } from './Active.jsx'
 
@@ -30,32 +31,82 @@ function EmptyCard({ icon, title, detail }) {
 
 export function ActivityView({ activity, onTx, live = false, loading = false }) {
   const [filter, setFilter] = useState('all')
+  const [open, setOpen] = useState(null)
   const kinds = [
     { id: 'all', label: 'All events' },
-    { id: 'exec', label: 'Executions' },
+    { id: 'executed', label: 'Executed' },
+    { id: 'blocked', label: 'Blocked' },
+    { id: 'planned', label: 'Planned / no-op' },
+    { id: 'exec', label: 'Trades', sep: true },
+    { id: 'rebalance', label: 'Rebalance' },
+    { id: 'bridge', label: 'Bridge' },
     { id: 'guardian', label: 'Guardian' },
-    { id: 'retry', label: 'Retries' },
-    { id: 'monitor', label: 'Monitoring' },
     { id: 'policy', label: 'Policy' },
   ]
   const meta = {
     exec: { c: 'var(--accent)', bg: 'var(--accent-dim)', icon: 'bolt', label: 'EXECUTION' },
+    rebalance: { c: 'var(--sui)', bg: 'var(--sui-dim)', icon: 'swap', label: 'REBALANCE' },
+    bridge: { c: 'var(--accent)', bg: 'var(--accent-dim)', icon: 'globe', label: 'BRIDGE' },
     guardian: { c: 'var(--danger)', bg: 'var(--danger-dim)', icon: 'shield', label: 'GUARDIAN' },
     fail: { c: 'var(--danger)', bg: 'var(--danger-dim)', icon: 'x', label: 'FAILED' },
     retry: { c: 'var(--warn)', bg: 'var(--warn-dim)', icon: 'refresh', label: 'RETRY' },
     monitor: { c: 'var(--t1)', bg: 'var(--glass-hi)', icon: 'eye', label: 'MONITOR' },
     policy: { c: 'var(--sui)', bg: 'var(--sui-dim)', icon: 'grid', label: 'POLICY' },
   }
-  const filtered = activity.filter(a => filter === 'all' || a.kind === filter || (filter === 'retry' && a.kind === 'fail'))
+  const outcomeOf = (a) => {
+    if (a.kind === 'guardian' || a.kind === 'fail') return 'blocked'
+    if (a.kind === 'monitor') return 'planned'
+    return 'executed'
+  }
+  const OUTCOME = {
+    executed: { label: 'Executed', c: 'var(--safe)' },
+    blocked: { label: 'Blocked', c: 'var(--danger)' },
+    planned: { label: 'No action', c: 'var(--t2)' },
+  }
+  const filtered = activity.filter(a =>
+    filter === 'all' ? true
+    : ['executed', 'blocked', 'planned'].includes(filter) ? outcomeOf(a) === filter
+    : filter === 'retry' ? (a.kind === 'retry' || a.kind === 'fail')
+    : a.kind === filter)
   const dates = [...new Set(filtered.map(a => a.date))]
+
+  // synthesize the planned-vs-executed detail for an event
+  const expand = (a) => {
+    const oc = outcomeOf(a)
+    const px = RG.prices[(a.policy.match(/SUI|DEEP|WAL|BTC|ETH/) || ['SUI'])[0]] || RG.prices.SUI
+    const reason = {
+      exec: 'A trigger condition in the policy was met, so the agent placed the order within its budget and slippage limits.',
+      rebalance: 'Net exposure drifted past the policy threshold; the agent restored the target position.',
+      bridge: 'A leg needed collateral on another chain; the agent bridged funds to keep both sides funded.',
+      guardian: 'A pre-execution Guardian check failed, so the agent declined to act and logged the reason.',
+      fail: 'The order was submitted but the book moved past the limit before settlement; no funds were spent.',
+      retry: 'A prior attempt failed; the agent re-quoted and resubmitted within the same limits.',
+      monitor: 'A scheduled risk evaluation ran. Conditions stayed inside policy, so no action was taken.',
+      policy: 'You authorized a new on-chain Policy Object granting the agent scoped, capped authority.',
+    }[a.kind] || 'Agent evaluated the policy and acted within limits.'
+    const plan = {
+      exec: ['assert_within_budget(cap, spent)', 'deepbook::place_limit_order(...)', 'log_activity(action="exec")'],
+      rebalance: ['read_net_delta()', 'adjust_legs(target≈0)', 'log_activity(action="rebalance")'],
+      bridge: ['assert_within_budget(cap, spent)', 'debridge::send(to, asset, amt)', 'await_settlement()'],
+      guardian: ['assert_pool_liquidity(min)', '→ FAILED · abort()', 'log_activity(action="blocked")'],
+      fail: ['place_limit_order(...)', '→ book moved · revert()', 'queue_retry()'],
+      retry: ['re_quote()', 'place_limit_order(...)', 'log_activity(action="retry")'],
+      monitor: ['read_oracle(price, vol)', 'recompute_risk()', '→ within policy · no-op'],
+      policy: ['publish_policy_object(budget, scope)', 'grant_capability(agent)'],
+    }[a.kind] || ['evaluate()', 'act_within_policy()']
+    return { oc, px, reason, plan }
+  }
 
   return (
     <div style={{ maxWidth: 920, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {kinds.map(k => (
-            <Button key={k.id} onPress={() => setFilter(k.id)} size="sm"
-              className={filter === k.id ? 'bg-accent text-accent-foreground font-semibold' : 'rg-btn-2'}>{k.label}</Button>
+            <Fragment key={k.id}>
+              {k.sep && <span style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 2px' }} />}
+              <Button onPress={() => setFilter(k.id)} size="sm"
+                className={filter === k.id ? 'bg-accent text-accent-foreground font-semibold' : 'rg-btn-2'}>{k.label}</Button>
+            </Fragment>
           ))}
         </div>
         <div className="badge badge-neutral"><Icon name="link" size={12} /> verified on-chain</div>
@@ -72,32 +123,93 @@ export function ActivityView({ activity, onTx, live = false, loading = false }) 
           <div className="eyebrow" style={{ marginBottom: 10, marginLeft: 2 }}>{date}</div>
           <div className="card" style={{ overflow: 'hidden' }}>
             {filtered.filter(a => a.date === date).map((a, i) => {
-              const m = meta[a.kind]
+              const m = meta[a.kind] || meta.monitor
+              const key = a.t + a.title
+              const isOpen = open === key
+              const ex = expand(a)
+              const oc = OUTCOME[ex.oc]
               return (
-                <div key={a.t + i} style={{ display: 'flex', gap: 14, padding: '15px 18px', borderTop: i ? '1px solid var(--border)' : 'none', alignItems: 'flex-start' }}>
-                  <div style={{ width: 34, height: 34, borderRadius: 9, background: m.bg, color: m.c, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Icon name={m.icon} size={17} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>{a.title}</span>
-                      <span className="mono" style={{ fontSize: 9.5, fontWeight: 700, color: m.c, letterSpacing: '0.08em' }}>{m.label}</span>
-                      {a.mode && <span className="badge badge-neutral" style={{ fontSize: 9.5, padding: '2px 7px' }}>
-                        <Icon name={a.mode === 'cloud' ? 'cloud' : 'cpu'} size={10} />{a.mode}</span>}
+                <div key={key} style={{ borderTop: i ? '1px solid var(--border)' : 'none' }}>
+                  <div onClick={() => setOpen(isOpen ? null : key)} style={{ display: 'flex', gap: 14, padding: '15px 18px', alignItems: 'flex-start', cursor: 'pointer', background: isOpen ? 'var(--glass)' : 'transparent', transition: 'background .12s' }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 9, background: m.bg, color: m.c, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Icon name={m.icon} size={17} />
                     </div>
-                    <div style={{ fontSize: 12.5, color: 'var(--t1)', marginTop: 3 }}>{a.detail}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8 }}>
-                      <span className="mono" style={{ fontSize: 11, color: 'var(--t2)' }}><Icon name="clock" size={11} style={{ verticalAlign: -1, marginRight: 3 }} />{a.t}</span>
-                      <span className="mono" style={{ fontSize: 11.5, color: 'var(--t1)' }}>{a.policy}</span>
-                      {a.tx && <a href="#" onClick={e => { e.preventDefault(); onTx && onTx(a.tx) }} className="mono" style={{ fontSize: 11, color: 'var(--sui)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                        <Icon name="link" size={11} />{a.tx}</a>}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600, fontSize: 14 }}>{a.title}</span>
+                        <span className="badge" style={{ fontSize: 9, background: `color-mix(in srgb, ${oc.c} 14%, transparent)`, color: oc.c }}><span className="dot"></span>{oc.label}</span>
+                        {a.mode && <ModeBadge mode={a.mode} />}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: 'var(--t1)', marginTop: 3 }}>{a.detail}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 8 }}>
+                        <span className="mono" style={{ fontSize: 11, color: 'var(--t2)' }}><Icon name="clock" size={11} style={{ verticalAlign: -1, marginRight: 3 }} />{a.t}</span>
+                        <span className="mono" style={{ fontSize: 11.5, color: 'var(--t1)' }}>{a.policy}</span>
+                        {a.tx && <a href="#" onClick={e => { e.preventDefault(); e.stopPropagation(); onTx && onTx(a.tx) }} className="mono" style={{ fontSize: 11, color: 'var(--sui)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          <Icon name="link" size={11} />{a.tx}</a>}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div>
+                        {a.amount !== 0 && <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: a.amount > 0 ? 'var(--safe)' : 'var(--danger)' }}>{a.amount > 0 ? '+' : '−'}${fmtUsd(Math.abs(a.amount))}</div>}
+                        {a.risk != null && <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: a.amount !== 0 ? 4 : 0 }}>
+                          risk <span className="mono" style={{ color: a.risk >= 60 ? 'var(--danger)' : a.risk >= 45 ? 'var(--warn)' : 'var(--safe)', fontWeight: 600 }}>{a.risk}</span></div>}
+                      </div>
+                      <Icon name="chevR" size={15} style={{ color: 'var(--t3)', transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    {a.amount !== 0 && <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--danger)' }}>−${fmtUsd(Math.abs(a.amount))}</div>}
-                    {a.risk != null && <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: a.amount !== 0 ? 4 : 0 }}>
-                      risk <span className="mono" style={{ color: a.risk >= 60 ? 'var(--danger)' : a.risk >= 45 ? 'var(--warn)' : 'var(--safe)', fontWeight: 600 }}>{a.risk}</span></div>}
-                  </div>
+
+                  {/* expanded detail — planned vs executed */}
+                  {isOpen && (
+                    <div className="fade-up" style={{ padding: '4px 18px 18px 66px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                      <div style={{ gridColumn: '1 / -1', fontSize: 12.5, color: 'var(--t1)', lineHeight: 1.55, padding: '12px 14px', borderRadius: 'var(--r-sm)', background: 'var(--glass)', border: '1px solid var(--border)' }}>
+                        <span className="eyebrow" style={{ fontSize: 8.5, display: 'block', marginBottom: 5 }}>Why the agent did this</span>
+                        {ex.reason}
+                      </div>
+                      <div>
+                        <span className="eyebrow" style={{ fontSize: 8.5, display: 'block', marginBottom: 8 }}>Input snapshot</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                          {[['Price', '$' + (ex.px.usd < 1 ? ex.px.usd.toFixed(4) : ex.px.usd.toFixed(3))], ['24h', ex.px.chg + '%'], ['Risk score', a.risk != null ? a.risk : '—'], ['Mode', a.mode || '—']].map(([k, v]) => (
+                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                              <span style={{ color: 'var(--t2)' }}>{k}</span>
+                              <span className="mono" style={{ color: 'var(--t0)' }}>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="eyebrow" style={{ fontSize: 8.5, display: 'block', marginBottom: 8 }}>Execution plan (PTB)</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                          {ex.plan.map((stepp, j) => (
+                            <div key={j} className="mono" style={{ fontSize: 10.5, color: /FAILED|moved|abort|revert/.test(stepp) ? 'var(--danger)' : /no-op|within policy/.test(stepp) ? 'var(--t2)' : 'var(--t1)',
+                              padding: '5px 9px', borderRadius: 6, background: 'var(--bg-0)', display: 'flex', gap: 8 }}>
+                              <span style={{ color: 'var(--t3)' }}>{j + 1}</span>{stepp}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 160, display: 'flex', alignItems: 'center', gap: 9, padding: '11px 13px', borderRadius: 'var(--r-sm)',
+                          background: ex.oc === 'blocked' ? 'var(--danger-dim)' : 'var(--safe-dim)', border: `1px solid color-mix(in srgb, ${oc.c} 30%, var(--border))` }}>
+                          <span style={{ color: oc.c, flexShrink: 0 }}><Icon name={ex.oc === 'blocked' ? 'shield' : 'check'} size={15} stroke={2.2} /></span>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>Guardian: {ex.oc === 'blocked' ? 'blocked execution' : ex.oc === 'planned' ? 'no action needed' : 'all checks passed'}</div>
+                            <div style={{ fontSize: 10.5, color: 'var(--t2)' }}>{ex.oc === 'blocked' ? 'Order rejected before any funds moved' : 'Budget, slippage and scope verified on-chain'}</div>
+                          </div>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 160, display: 'flex', alignItems: 'center', gap: 14, padding: '11px 13px', borderRadius: 'var(--r-sm)', background: 'var(--glass)', border: '1px solid var(--border)' }}>
+                          <div>
+                            <div className="eyebrow" style={{ fontSize: 8 }}>PnL impact</div>
+                            <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: a.amount > 0 ? 'var(--safe)' : a.amount < 0 ? 'var(--t0)' : 'var(--t2)' }}>{a.amount !== 0 ? (a.amount > 0 ? '+' : '−') + '$' + fmtUsd(Math.abs(a.amount)) : 'none'}</div>
+                          </div>
+                          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)' }} />
+                          <div>
+                            <div className="eyebrow" style={{ fontSize: 8 }}>Budget impact</div>
+                            <div className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{a.amount < 0 ? '−$' + fmtUsd(Math.abs(a.amount)) : '$0'}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })}
