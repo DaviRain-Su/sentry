@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import { RG } from '../data.js'
 import { getSuiPriceHistory } from '../api.js'
 import { Icon, Sparkline, RiskGauge, Token, PairGlyph, useAnimatedNumber, fmtUsd } from './primitives.jsx'
+import { Liveline } from 'liveline'
 
 function StatCard({ label, value, sub, accent, icon, spark, sparkColor }) {
   return (
@@ -22,52 +23,46 @@ function StatCard({ label, value, sub, accent, icon, spark, sparkColor }) {
   )
 }
 
+// Real-time price chart powered by Liveline (canvas, 60fps interpolation).
+// canvas can't read CSS vars, so resolve them to concrete hex (still follows
+// the accent tweak). degen (shake + particles) fires during the crash demo,
+// and a referenceLine marks the rescue trigger level.
+function cssVar(name, fallback) {
+  if (typeof window === 'undefined') return fallback
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+
 function PriceChart({ data, crashState }) {
-  const w = 600, h = 200
-  const pad = { l: 8, r: 8, t: 16, b: 8 }
-  const min = Math.min(...data) * 0.995, max = Math.max(...data) * 1.002
-  const rng = max - min || 1
-  const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b
-  const pts = data.map((v, i) => {
-    const x = pad.l + (i / (data.length - 1)) * iw
-    const y = pad.t + ih - ((v - min) / rng) * ih
-    return [x, y]
-  })
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ')
-  const area = line + ` L${pts[pts.length-1][0]} ${h-pad.b} L${pad.l} ${h-pad.b} Z`
-  const last = pts[pts.length - 1]
   const crashing = crashState === 'crashing' || crashState === 'rescuing'
-  const col = crashing ? 'var(--danger)' : 'var(--accent)'
-  // rescue rung lines (only when rescuing/rescued)
-  const rungs = (crashState === 'rescuing' || crashState === 'rescued')
-    ? [3.85, 3.74].map(px => pad.t + ih - ((px - min) / rng) * ih) : []
+  const color = crashing ? cssVar('--danger', '#ff5470') : cssVar('--accent', '#2EE6CE')
+  // Liveline expects unix-second timestamps within its visible window; lay the
+  // snapshot points out across the last N seconds ending ~now.
+  const nowSec = Math.floor(Date.now() / 1000)
+  const series = (data || []).map((v, i) => ({ time: nowSec - (data.length - 1 - i), value: v }))
+  const value = series.length ? series[series.length - 1].value : 0
+  const dec = value && value < 1 ? 4 : 3
+  const showRef = (crashing || crashState === 'rescued') && data && data.length
+  const referenceLine = showRef ? { value: Number((data[0] * 0.916).toFixed(dec)), label: 'trigger −8.4%' } : undefined
   return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: 'block' }}>
-      <defs>
-        <linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={col} stopOpacity="0.22" />
-          <stop offset="100%" stopColor={col} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {[0.25, 0.5, 0.75].map(f => (
-        <line key={f} x1={pad.l} x2={w - pad.r} y1={pad.t + ih * f} y2={pad.t + ih * f} stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-      ))}
-      {rungs.map((y, i) => (
-        <g key={i}>
-          <line x1={pad.l} x2={w - pad.r} y1={y} y2={y} stroke="var(--accent)" strokeWidth="1" strokeDasharray="4 4" opacity="0.6" />
-          <rect x={w - pad.r - 86} y={y - 9} width="80" height="16" rx="4" fill="var(--accent-dim)" />
-          <text x={w - pad.r - 46} y={y + 3} fontSize="10" fontFamily="var(--f-mono)" fill="var(--accent)" textAnchor="middle">rung {i+1}</text>
-        </g>
-      ))}
-      <path d={area} fill="url(#pcg)" />
-      <path d={line} fill="none" stroke={col} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"
-        style={{ transition: 'stroke .3s', filter: `drop-shadow(0 0 6px ${crashing ? 'var(--danger-glow)' : 'transparent'})` }} />
-      <circle cx={last[0]} cy={last[1]} r="4" fill={col} />
-      <circle cx={last[0]} cy={last[1]} r="4" fill="none" stroke={col} strokeWidth="1.5">
-        <animate attributeName="r" from="4" to="11" dur="1.5s" repeatCount="indefinite" />
-        <animate attributeName="opacity" from="0.7" to="0" dur="1.5s" repeatCount="indefinite" />
-      </circle>
-    </svg>
+    <div style={{ height: 200 }}>
+      <Liveline
+        data={series}
+        value={value}
+        theme="dark"
+        color={color}
+        fill
+        grid
+        momentum
+        pulse
+        lineWidth={2.2}
+        degen={crashing ? { scale: 1.3, downMomentum: true } : false}
+        referenceLine={referenceLine}
+        formatValue={(v) => '$' + v.toFixed(dec)}
+        padding={{ top: 16, right: 8, bottom: 8, left: 8 }}
+        style={{ width: '100%', height: '100%' }}
+      />
+    </div>
   )
 }
 
