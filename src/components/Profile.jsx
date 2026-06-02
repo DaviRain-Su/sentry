@@ -96,7 +96,7 @@ function FundingReadiness({ funding, live }) {
   )
 }
 
-export function Profile({ account, holdings, policies, funding = null, live = false, readOnly = false, loading = false, onNav, onToast }) {
+export function Profile({ account, holdings, policies, funding = null, live = false, readOnly = false, loading = false, onNav, onToast, onLogout }) {
   const a = account
   const total = holdings.reduce((s, h) => s + h.value, 0)
   const free = holdings.filter(h => h.state === 'free').reduce((s, h) => s + h.value, 0)
@@ -151,6 +151,11 @@ export function Profile({ account, holdings, policies, funding = null, live = fa
               <Button size="sm" variant="light" className="text-[color:var(--sui)]" onPress={() => { if (live && a.fullAddr) window.open('https://suiscan.xyz/testnet/account/' + a.fullAddr, '_blank', 'noopener,noreferrer'); else onToast && onToast('Connect a wallet to view it on SuiScan', 'var(--sui)') }}>
                 <Icon name="link" size={13} /> SuiScan
               </Button>
+              {onLogout && (
+                <Button size="sm" variant="light" className="text-[color:var(--danger)]" title="Log out" onPress={onLogout}>
+                  <Icon name="logout" size={13} /> Sign out
+                </Button>
+              )}
             </div>
           </div>
         </div>

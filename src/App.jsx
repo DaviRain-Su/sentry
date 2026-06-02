@@ -366,6 +366,15 @@ export default function App({ onExit }) {
     setView('policies')
   }
 
+  const logout = () => {
+    if (account) disconnect()
+    // autoConnect would silently re-connect the wallet on next launch — clear
+    // dapp-kit's stored connection so logout actually sticks.
+    try { Object.keys(localStorage).forEach(k => { if (/dapp-kit/i.test(k)) localStorage.removeItem(k) }) } catch { /* ignore */ }
+    setAuthed(false)
+    onExit && onExit()
+  }
+
   const shownActivity = liveReadsEnabled ? liveActivity : activity
   const state = { risk, suiPrice, suiSpark, crashState, mode, agentOn, activity: shownActivity }
 
@@ -457,14 +466,24 @@ export default function App({ onExit }) {
           )}
 
           {/* user */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', borderTop: '1px solid var(--border)' }}>
-            <div onClick={() => setView('profile')} title="Profile & wallet" style={{ cursor: 'pointer', width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(135deg,#2EE6CE,#5AA6FF)', color: '#06231f',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{account ? owner.slice(2, 4).toUpperCase() : readOnlyLiveMode ? 'AG' : RG.user.avatar}</div>
-            <div className="rg-userblock" onClick={() => setView('profile')} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
-              <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ownerShort}</div>
-              <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{account ? 'Sui wallet · testnet' : readOnlyLiveMode ? 'Worker live reads · no signing' : RG.user.provider}</div>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+            <div onClick={() => setView('profile')} title="Profile & wallet" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', cursor: 'pointer', borderRadius: 'var(--r-md)' }}>
+              <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(135deg,#2EE6CE,#5AA6FF)', color: '#06231f',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{account ? owner.slice(2, 4).toUpperCase() : readOnlyLiveMode ? 'AG' : RG.user.avatar}</div>
+              <div className="rg-userblock" style={{ flex: 1, minWidth: 0 }}>
+                <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ownerShort}</div>
+                <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{account ? 'Sui wallet · testnet' : readOnlyLiveMode ? 'Worker live reads · no signing' : RG.user.provider}</div>
+              </div>
             </div>
-            <span style={{ color: 'var(--t2)', cursor: 'pointer' }} onClick={() => { if (account) disconnect(); setAuthed(false); onExit && onExit() }}><Icon name="logout" size={16} /></span>
+            {/* explicit, labeled log out */}
+            <button onClick={logout} title="Log out"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', marginTop: 4, padding: '9px 10px',
+                background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', cursor: 'pointer',
+                color: 'var(--t1)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', transition: 'all .14s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger-dim)'; e.currentTarget.style.color = 'var(--danger)'; e.currentTarget.style.borderColor = 'var(--danger)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t1)'; e.currentTarget.style.borderColor = 'var(--border)' }}>
+              <Icon name="logout" size={15} /> <span className="rg-navlabel">Log out</span>
+            </button>
           </div>
         </aside>
 
@@ -618,6 +637,7 @@ export default function App({ onExit }) {
               } : RG.account}
               onNav={setView}
               onToast={(m, c) => showToast(m, c)}
+              onLogout={logout}
             />}
           </div>
         </main>
@@ -638,6 +658,9 @@ export default function App({ onExit }) {
 
         <TweaksPanel>
           <TweakSection label="Theme" />
+          <TweakRadio label="Mode" value={t.theme}
+            options={['dark', 'light']}
+            onChange={(v) => setTweak('theme', v)} />
           <TweakColor label="Accent" value={t.accent}
             options={['#2EE6CE', '#5AA6FF', '#A78BFA', '#FFC24B', '#FF7A8A']}
             onChange={(v) => setTweak('accent', v)} />
