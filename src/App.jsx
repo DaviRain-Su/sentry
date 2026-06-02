@@ -29,6 +29,7 @@ import { MarketsView } from './components/Markets.jsx'
 import { RiskCenter } from './components/Risk.jsx'
 import { StrategyMarketplace, StrategyDetail } from './components/Marketplace.jsx'
 import { DataSources } from './components/DataSources.jsx'
+import { ActiveStrategy } from './components/Active.jsx'
 import { AgentRuntimeDrawer } from './components/MarketDrawers.jsx'
 import { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle } from './components/TweaksPanel.jsx'
 import { Button } from '@heroui/react'
@@ -64,6 +65,7 @@ export default function App({ onExit }) {
   const [txView, setTxView] = useState(null)
   const [seed, setSeed] = useState(null)
   const [stratId, setStratId] = useState(null)
+  const [liveId, setLiveId] = useState(null)
   const [liveFeed, setLiveFeed] = useState(false)
   const [runtimeOpen, setRuntimeOpen] = useState(false)
   const [runtimeMode, setRuntimeMode] = useState(null)
@@ -272,6 +274,17 @@ export default function App({ onExit }) {
     setPolicies(ps => ps.filter(p => p.id !== id))
     showToast('Policy revoked on-chain — agent authority deleted', 'var(--danger)')
     pushNotif('policy', 'Policy revoked on-chain')
+  }
+
+  const togglePolicy = (p) => {
+    setPolicies(ps => ps.map(x => x.id === p.id ? { ...x, status: x.status === 'active' ? 'paused' : 'active' } : x))
+    showToast(p.status === 'active' ? 'Strategy paused — agent holds, no new actions' : 'Strategy resumed — agent active within policy', p.status === 'active' ? 'var(--warn)' : 'var(--accent)')
+  }
+
+  const rebalanceNow = (p) => {
+    setActivity(a => [{ t: '14:40:11', date: 'Today', kind: 'rebalance', policy: p.name, title: 'Manual rebalance triggered', detail: 'Owner requested re-centering · agent restored target exposure within policy limits.', amount: 0, tx: '0x' + Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6), risk: null, mode: p.mode }, ...a])
+    showToast('Rebalance executed — exposure restored within policy', 'var(--accent)')
+    pushNotif('rebalance', `Rebalanced · ${p.name}`)
   }
 
   const emergencyStop = () => {
@@ -564,7 +577,11 @@ export default function App({ onExit }) {
             {view === 'strategies' && <StrategyMarketplace onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} onOpen={(id) => { setStratId(id); setView('strategy-detail') }} />}
             {view === 'strategy-detail' && <StrategyDetail id={stratId} onBack={() => setView('strategies')} onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} />}
             {view === 'data' && <DataSources onToast={showToast} live={liveFeed} setLive={setLiveFeed} />}
-            {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} />}
+            {view === 'active' && (policies.find(x => x.id === liveId)
+              ? <ActiveStrategy p={policies.find(x => x.id === liveId)} activity={shownActivity} onBack={() => setView('policies')}
+                  onToggle={togglePolicy} onRebalance={rebalanceNow} onRevoke={handleRevoke} onTx={setTxView} onToast={showToast} />
+              : <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} onLive={(p) => { setLiveId(p.id); setView('active') }} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} />)}
+            {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} onLive={(p) => { setLiveId(p.id); setView('active') }} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} />}
             {view === 'profile' && <Profile
               live={liveReadsEnabled}
               readOnly={readOnlyLiveMode}

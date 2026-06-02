@@ -107,7 +107,7 @@ export function ActivityView({ activity, onTx, live = false, loading = false }) 
   )
 }
 
-function PolicyCard({ p, onRevoke, onInspect, readOnly = false }) {
+function PolicyCard({ p, onRevoke, onInspect, onLive, readOnly = false }) {
   const pct = Math.round((p.budgetUsed / p.budgetCap) * 100)
   const stratMeta = {
     'rescue-grid': { icon: 'grid', label: 'Rescue Grid', c: 'var(--accent)' },
@@ -172,6 +172,7 @@ function PolicyCard({ p, onRevoke, onInspect, readOnly = false }) {
         <span className="mono" style={{ fontSize: 11.5, color: days < 5 ? 'var(--warn)' : 'var(--t2)' }}>
           <Icon name="clock" size={12} style={{ verticalAlign: -2, marginRight: 4 }} />expires in {days}d</span>
         <div style={{ display: 'flex', gap: 8 }}>
+          {onLive && p.status !== 'revoked' && <Button size="sm" className="rg-btn-2" onPress={() => onLive(p)} startContent={<Icon name="activity" size={13} />}>Live</Button>}
           <Button size="sm" className="rg-btn-2" onPress={() => onInspect(p)} startContent={<Icon name="eye" size={13} />}>Inspect</Button>
           <Button size="sm" isDisabled={readOnly || p.status === 'revoked'} onPress={() => onRevoke(p.id)} className="bg-danger text-white">
             <Icon name="x" size={13} stroke={2.4} /> {readOnly ? 'Read-only' : p.status === 'revoked' ? 'Revoked' : 'Revoke'}</Button>
@@ -181,7 +182,7 @@ function PolicyCard({ p, onRevoke, onInspect, readOnly = false }) {
   )
 }
 
-export function PoliciesView({ policies, onRevoke, onInspect, live = false, readOnly = false, loading = false }) {
+export function PoliciesView({ policies, onRevoke, onInspect, onLive, live = false, readOnly = false, loading = false }) {
   const totalCap = policies.reduce((s, p) => s + p.budgetCap, 0)
   const totalUsed = policies.reduce((s, p) => s + p.budgetUsed, 0)
   return (
@@ -214,7 +215,7 @@ export function PoliciesView({ policies, onRevoke, onInspect, live = false, read
       )}
       {!loading && policies.length > 0 && (
         <div className="rg-2col">
-          {policies.map(p => <PolicyCard key={p.id} p={p} onRevoke={onRevoke} onInspect={onInspect} readOnly={readOnly} />)}
+          {policies.map(p => <PolicyCard key={p.id} p={p} onRevoke={onRevoke} onInspect={onInspect} onLive={onLive} readOnly={readOnly} />)}
         </div>
       )}
     </div>
