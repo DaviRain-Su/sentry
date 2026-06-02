@@ -1,7 +1,7 @@
 // Real zkLogin via Enoki + dapp-kit. Wraps the app in the Sui client + wallet
 // providers and registers Enoki zkLogin wallets (Google) when configured.
-// Without VITE_ENOKI_API_KEY / VITE_GOOGLE_CLIENT_ID the app still runs in
-// demo mode — the providers are present but no Enoki wallet is registered.
+// Without VITE_ENOKI_API_KEY / VITE_GOOGLE_CLIENT_ID the providers are still
+// present, but no Enoki wallet is registered.
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SuiClientProvider, WalletProvider, createNetworkConfig, useSuiClient } from '@mysten/dapp-kit'
@@ -39,7 +39,7 @@ export function Providers({ children }) {
   return (
     <QueryClientProvider client={queryClient}>
       <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-        <WalletProvider autoConnect>
+        <WalletProvider autoConnect={false}>
           <RegisterEnoki />
           {children}
         </WalletProvider>

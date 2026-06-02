@@ -9,7 +9,7 @@ import { isEnokiWallet } from '@mysten/enoki'
 import { Icon, Logo } from './primitives.jsx'
 import { Button } from '@heroui/react'
 
-export function ZkLogin({ onAuth, onBackToLanding }) {
+export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
   const [loading, setLoading] = useState(null)
   const wallets = useWallets()
   const { mutate: connect } = useConnectWallet()
@@ -17,7 +17,7 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
 
   // Once a Sui account is connected, we're authed (real on-chain identity).
   useEffect(() => {
-    if (account) onAuth(account.address)
+    if (account) onAuth('wallet', account.address)
   }, [account, onAuth])
 
   // standard Sui wallets (Slush, Sui Wallet, …) — no credentials needed
@@ -32,7 +32,7 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
     <div style={{ position: 'relative', zIndex: 1, height: '100vh', display: 'grid', gridTemplateColumns: '1.1fr 0.9fr' }}>
       {/* left — brand / value */}
       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '56px 60px',
-        borderRight: '1px solid var(--border)', background: 'rgba(8,11,17,0.4)' }}>
+        borderRight: '1px solid var(--border)', background: 'var(--chrome-auth)', backdropFilter: 'blur(10px)' }}>
         <a onClick={(e) => { e.preventDefault(); onBackToLanding && onBackToLanding() }} href="#"
           style={{ textDecoration: 'none', color: 'inherit', cursor: 'pointer', alignSelf: 'flex-start' }}><Logo size={34} /></a>
         <div style={{ maxWidth: 520 }}>
@@ -89,14 +89,23 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
           </div>
 
-          <Button onPress={() => onAuth()} className="rg-btn-2 justify-center" fullWidth startContent={<Icon name="eye" size={15} />}>
+          <Button onPress={() => onAuth('demo')} className="rg-btn-2 justify-center" fullWidth startContent={<Icon name="eye" size={15} />}>
             Explore the demo (no wallet)
           </Button>
+
+          {workerConfigured && (
+            <Button onPress={() => onAuth('readonly')} className="rg-btn-2 justify-center" fullWidth startContent={<Icon name="link" size={15} />}
+              style={{ marginTop: 10 }}>
+              Open Worker read-only
+            </Button>
+          )}
 
           <div style={{ marginTop: 14, fontSize: 11, color: standardWallets.length > 0 ? 'var(--safe)' : 'var(--t2)', fontFamily: 'var(--f-mono)' }}>
             {standardWallets.length > 0
               ? '● Sui wallet ready · testnet — real on-chain sign-in'
-              : '○ no wallet — demo runs on mock data'}
+              : workerConfigured
+                ? '○ no wallet — choose demo mock data or Worker read-only'
+                : '○ no wallet — demo runs on mock data'}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0' }}>

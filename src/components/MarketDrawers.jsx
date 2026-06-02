@@ -55,10 +55,10 @@ export function PoolDrawer({ pool, onClose, onDeploy }) {
   );
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(3,5,8,0.66)', backdropFilter: 'blur(3px)',
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--overlay-backdrop)', backdropFilter: 'blur(3px)',
       display: 'flex', justifyContent: 'flex-end', animation: 'fadeUp .25s ease' }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 540, maxWidth: '94vw', height: '100%', background: 'var(--bg-2)',
-        borderLeft: '1px solid var(--border-hi)', overflowY: 'auto', overflowX: 'hidden', boxShadow: '-30px 0 80px -20px rgba(0,0,0,0.6)' }}>
+    <div onClick={e => e.stopPropagation()} style={{ width: 540, maxWidth: '94vw', height: '100%', background: 'var(--bg-2)',
+        borderLeft: '1px solid var(--border-hi)', overflowY: 'auto', overflowX: 'hidden', boxShadow: 'var(--drawer-shadow)' }}>
         {/* header */}
         <div style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', padding: '20px 24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -181,10 +181,10 @@ export function AgentRuntimeDrawer({ mode, onClose, onToast }) {
   );
 
   return (
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(3,5,8,0.66)', backdropFilter: 'blur(3px)',
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'var(--overlay-backdrop)', backdropFilter: 'blur(3px)',
       display: 'flex', justifyContent: 'flex-end', animation: 'fadeUp .25s ease' }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: 520, maxWidth: '94vw', height: '100%', background: 'var(--bg-2)',
-        borderLeft: '1px solid var(--border-hi)', overflowY: 'auto', overflowX: 'hidden', boxShadow: '-30px 0 80px -20px rgba(0,0,0,0.6)' }}>
+    <div onClick={e => e.stopPropagation()} style={{ width: 520, maxWidth: '94vw', height: '100%', background: 'var(--bg-2)',
+        borderLeft: '1px solid var(--border-hi)', overflowY: 'auto', overflowX: 'hidden', boxShadow: 'var(--drawer-shadow)' }}>
         {/* header */}
         <div style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-2)', borderBottom: '1px solid var(--border)', padding: '20px 24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
