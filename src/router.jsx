@@ -150,7 +150,13 @@ function RootLayout() {
               <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ownerShort}</div>
               <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{account ? 'Sui wallet · testnet' : readOnlyLiveMode ? 'Worker live reads · no signing' : RG.user.provider}</div>
             </div>
-            <span style={{ color: 'var(--t2)', cursor: 'pointer' }} onClick={c.logout}><Icon name="logout" size={16} /></span>
+            <button onClick={c.logout} title="Log out" aria-label="Log out"
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--danger)'; e.currentTarget.style.background = 'var(--danger-dim)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--t2)'; e.currentTarget.style.background = 'transparent' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, flexShrink: 0,
+                borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--t2)', cursor: 'pointer', transition: 'all .14s' }}>
+              <Icon name="logout" size={16} />
+            </button>
           </div>
         </aside>
 
