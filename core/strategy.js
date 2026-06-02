@@ -49,14 +49,25 @@ export function parseIntent(text, owner, defaults = {}, nowMs = Date.now()) {
   const poolCfg = POOL_BY_ASSET[asset]
   if (!poolCfg) return { status: 'error', code: 'UNSUPPORTED_ASSET', message: `Asset ${asset} has no supported Deepbook pool on testnet.` }
 
-  const thMatch = t.match(/(\d+(?:\.\d+)?)\s*(?:%|percent)/i)
-  if (!thMatch) return { status: 'error', code: 'INTENT_AMBIGUOUS', message: 'Trigger threshold is missing — say e.g. "drops more than 8%".' }
+  // Threshold: keep the canonical "8%" / "8 percent" form first (unchanged
+  // result + hash), then fall back to colloquial / Chinese phrasings.
+  const thMatch =
+    t.match(/(\d+(?:\.\d+)?)\s*(?:%|percent)/i) ||
+    t.match(/(\d+(?:\.\d+)?)\s*(?:pct|个点|点)/i) ||
+    t.match(/百分之\s*(\d+(?:\.\d+)?)/)
+  if (!thMatch) return { status: 'error', code: 'INTENT_AMBIGUOUS', message: 'Trigger threshold is missing — say e.g. "drops more than 8%" (also accepts 8pct / 8个点 / 百分之8).' }
   const threshold_pct = thMatch[1]
 
-  const bm = t.match(/(\d[\d,]*(?:\.\d+)?)\s*USDC/i) || t.match(/\$\s*(\d[\d,]*(?:\.\d+)?)/)
+  // Budget: canonical "500 USDC" / "$500" first (unchanged result + hash),
+  // then colloquial / Chinese phrasings (500u / 500美金 / 预算500).
+  const bm =
+    t.match(/(\d[\d,]*(?:\.\d+)?)\s*USDC/i) ||
+    t.match(/\$\s*(\d[\d,]*(?:\.\d+)?)/) ||
+    t.match(/(\d[\d,]*(?:\.\d+)?)\s*(?:美金|美元|刀|u\b)/i) ||
+    t.match(/预算\s*[:：]?\s*(\d[\d,]*(?:\.\d+)?)/)
   const budgetNum = bm ? Number(bm[1].replace(/,/g, '')) : NaN
   if (!Number.isFinite(budgetNum) || budgetNum <= 0) {
-    return { status: 'error', code: 'INTENT_AMBIGUOUS', message: 'Budget is missing — say e.g. "a 500 USDC rescue grid".' }
+    return { status: 'error', code: 'INTENT_AMBIGUOUS', message: 'Budget is missing — say e.g. "a 500 USDC rescue grid" (also accepts $500 / 500u / 500美金 / 预算500).' }
   }
 
   const budget_ceiling = toUnits(budgetNum, BUDGET_COIN_DECIMALS)
