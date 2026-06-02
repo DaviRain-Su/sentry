@@ -57,6 +57,75 @@ assert.equal(
   assert.equal(readiness.balances.DBUSDC, '0')
   assert.equal(readiness.balances.DEEP, '0')
   assert.equal(readiness.balances.SUI_MIST, '123')
+  assert.equal(readiness.criteria.length, 3)
+  assert.equal(readiness.funding_ready, false)
+  assert.equal(readiness.execution_claimed, false)
+}
+
+{
+  const readiness = buildFundingReadiness({
+    agentAddress: OWNER,
+    balanceManagerId: '0xbm',
+    dbusdcBalance: '500000000',
+    deepBalance: '25',
+    suiBalanceMist: '1000000',
+    executionEnabled: true,
+  })
+  assert.equal(readiness.readiness_state, 'ready')
+  assert.equal(readiness.ready, true)
+  assert.equal(readiness.funding_state, 'ready')
+  assert.equal(readiness.funding_precondition_satisfied, true)
+  assert.equal(readiness.execution_claimed, false, 'funding readiness never claims execution success before a real tx')
+  assert.deepEqual(readiness.blocker_codes, [])
+  assert.deepEqual(readiness.criteria.map((r) => [r.asset, r.usable]), [
+    ['DBUSDC', true],
+    ['DEEP', true],
+    ['SUI_MIST', true],
+  ])
+}
+
+{
+  const readiness = buildFundingReadiness({
+    agentAddress: OWNER,
+    balanceManagerId: '0xbm',
+    dbusdcBalance: '500000000',
+    deepBalance: '25',
+    suiBalanceMist: '0',
+    executionEnabled: true,
+  })
+  assert.equal(readiness.ready, false)
+  assert.deepEqual(readiness.blocker_codes, ['INSUFFICIENT_GAS'])
+  assert.equal(readiness.criteria.find((r) => r.asset === 'SUI_MIST').usable, false)
+}
+
+{
+  const readiness = buildFundingReadiness({
+    agentAddress: OWNER,
+    balanceManagerId: '0xbm',
+    dbusdcBalance: '500000000',
+    deepBalance: '25',
+    suiBalanceMist: '1000000',
+    executionEnabled: true,
+    requiredDbusdcBalance: '500000001',
+  })
+  assert.equal(readiness.funding_ready, false, 'threshold above observed balance safely re-blocks without moving funds')
+  assert.deepEqual(readiness.blocker_codes, ['INSUFFICIENT_DBUSDC'])
+  assert.equal(readiness.blockers[0].observed, '500000000')
+  assert.equal(readiness.blockers[0].required, '500000001')
+}
+
+{
+  const readiness = buildFundingReadiness({
+    agentAddress: OWNER,
+    balanceManagerId: '0xbm',
+    dbusdcBalance: '500000000',
+    deepBalance: '25',
+    suiBalanceMist: '1000000',
+    executionEnabled: false,
+  })
+  assert.equal(readiness.funding_ready, true, 'funding precondition can be recognized separately from the enabled flag')
+  assert.equal(readiness.ready, false)
+  assert.deepEqual(readiness.blocker_codes, ['EXECUTION_DISABLED'])
 }
 
 console.log('\nALL READ SURFACE TESTS PASS')

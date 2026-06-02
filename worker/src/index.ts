@@ -27,6 +27,11 @@ export interface Env {
 const app = new Hono<{ Bindings: Env }>()
 const parseCache = new Map<string, Record<string, unknown>>()
 
+function positiveIntegerQuery(value: string | undefined, fallback: string): string {
+  if (!value) return fallback
+  return /^\d+$/.test(value) ? value : fallback
+}
+
 app.use('/api/*', cors())
 
 app.get('/', (c) => c.json({ service: 'rescuegrid-worker', agent: AGENT_ADDRESS, status: 'ok' }))
@@ -170,6 +175,9 @@ app.get('/api/balances', async (c) => {
       deepBalance: deepBalance.toString(),
       suiBalanceMist: String(suiBalance.totalBalance ?? '0'),
       executionEnabled: c.env.EXECUTION_ENABLED === 'true',
+      requiredDbusdcBalance: positiveIntegerQuery(c.req.query('dbusdc_threshold'), '1'),
+      requiredDeepBalance: positiveIntegerQuery(c.req.query('deep_threshold'), '1'),
+      requiredSuiGasMist: positiveIntegerQuery(c.req.query('sui_gas_threshold'), '1'),
     })
     return c.json({
       status: 'ok',

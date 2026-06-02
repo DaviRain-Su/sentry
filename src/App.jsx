@@ -186,6 +186,7 @@ export default function App({ onExit }) {
   const [liveSummary, setLiveSummary] = useState(null)
   const [liveMarket, setLiveMarket] = useState(null)
   const [liveHoldings, setLiveHoldings] = useState([])
+  const [liveFunding, setLiveFunding] = useState(null)
   const [liveLoading, setLiveLoading] = useState(false)
   const [liveReadMeta, setLiveReadMeta] = useState({ source: null, error: null })
   const refreshLivePolicies = async () => {
@@ -210,12 +211,18 @@ export default function App({ onExit }) {
       if (ar.status === 'ok') setLiveActivity(ar.activity)
       else setLiveActivity([])
       if (mr.status === 'ok') setLiveMarket(mr.market)
-      if (br.status === 'ok') setLiveHoldings(br.holdings)
-      else setLiveHoldings([])
+      if (br.status === 'ok') {
+        setLiveHoldings(br.holdings)
+        setLiveFunding(br.funding || null)
+      } else {
+        setLiveHoldings([])
+        setLiveFunding(null)
+      }
     } catch (e) {
       setPolicies([])
       setLiveActivity([])
       setLiveHoldings([])
+      setLiveFunding(null)
       setLiveSummary({ active_policies: 0, total_policies: 0, total_authorized: 0, total_deployed: 0, positions: [] })
       setLiveReadMeta({ source: 'error', error: String(e?.message || e) })
     }
@@ -524,6 +531,7 @@ export default function App({ onExit }) {
               loading={liveReadsEnabled && liveLoading}
               policies={policies}
               holdings={liveReadsEnabled ? liveHoldings : RG.holdings}
+              funding={liveReadsEnabled ? liveFunding : null}
               account={liveReadsEnabled ? {
                 avatar: account ? owner.slice(2, 4).toUpperCase() : 'AG',
                 handle: ownerShort,

@@ -10,6 +10,14 @@ function numericString(value) {
   return value == null ? '0' : String(value)
 }
 
+function bigintOrZero(value) {
+  try {
+    return BigInt(numericString(value))
+  } catch {
+    return 0n
+  }
+}
+
 function normalizeDefaults(defaults) {
   if (!defaults || typeof defaults !== 'object' || Array.isArray(defaults)) return {}
   return defaults
@@ -88,6 +96,9 @@ export function buildFundingReadiness({
   deepBalance,
   suiBalanceMist,
   executionEnabled,
+  requiredDbusdcBalance = '1',
+  requiredDeepBalance = '1',
+  requiredSuiGasMist = '1',
 }) {
   const balances = {
     DBUSDC: numericString(dbusdcBalance),
@@ -95,23 +106,57 @@ export function buildFundingReadiness({
     SUI_MIST: numericString(suiBalanceMist),
   }
   const thresholds = {
-    DBUSDC: { required: '>0', label: 'BalanceManager quote balance for live DeepBook orders' },
-    DEEP: { required: '>0', label: 'BalanceManager DEEP fee balance' },
-    SUI_MIST: { required: '>0', label: 'Agent wallet SUI gas balance' },
+    DBUSDC: { required: numericString(requiredDbusdcBalance), label: 'BalanceManager quote balance for live DeepBook orders' },
+    DEEP: { required: numericString(requiredDeepBalance), label: 'BalanceManager DEEP fee balance' },
+    SUI_MIST: { required: numericString(requiredSuiGasMist), label: 'Agent wallet SUI gas balance' },
   }
+  const criteria = [
+    {
+      holder: balanceManagerId,
+      holder_label: 'DeepBook BalanceManager',
+      asset: 'DBUSDC',
+      threshold: thresholds.DBUSDC.required,
+      observed_balance: balances.DBUSDC,
+      usable: bigintOrZero(balances.DBUSDC) >= bigintOrZero(thresholds.DBUSDC.required),
+      source_of_truth: 'DeepBook BalanceManager read from Sui Testnet',
+      blocker_code: 'INSUFFICIENT_DBUSDC',
+    },
+    {
+      holder: balanceManagerId,
+      holder_label: 'DeepBook BalanceManager',
+      asset: 'DEEP',
+      threshold: thresholds.DEEP.required,
+      observed_balance: balances.DEEP,
+      usable: bigintOrZero(balances.DEEP) >= bigintOrZero(thresholds.DEEP.required),
+      source_of_truth: 'DeepBook BalanceManager read from Sui Testnet',
+      blocker_code: 'INSUFFICIENT_DEEP',
+    },
+    {
+      holder: agentAddress,
+      holder_label: 'Agent gas address',
+      asset: 'SUI_MIST',
+      threshold: thresholds.SUI_MIST.required,
+      observed_balance: balances.SUI_MIST,
+      usable: bigintOrZero(balances.SUI_MIST) >= bigintOrZero(thresholds.SUI_MIST.required),
+      source_of_truth: 'Agent wallet gas balance from Sui Testnet',
+      blocker_code: 'INSUFFICIENT_GAS',
+    },
+  ]
   const blockers = []
   if (!executionEnabled) {
     blockers.push({ code: 'EXECUTION_DISABLED', label: 'Execution disabled', observed: 'false', required: 'true' })
   }
-  if (BigInt(balances.DBUSDC) <= 0n) {
-    blockers.push({ code: 'INSUFFICIENT_DBUSDC', label: 'BalanceManager DBUSDC unfunded', observed: balances.DBUSDC, required: thresholds.DBUSDC.required })
+  for (const row of criteria) {
+    if (row.usable) continue
+    const labels = {
+      INSUFFICIENT_DBUSDC: 'BalanceManager DBUSDC below required threshold',
+      INSUFFICIENT_DEEP: 'BalanceManager DEEP below required fee threshold',
+      INSUFFICIENT_GAS: 'Agent SUI gas below required threshold',
+    }
+    blockers.push({ code: row.blocker_code, label: labels[row.blocker_code], holder: row.holder, asset: row.asset, observed: row.observed_balance, required: row.threshold })
   }
-  if (BigInt(balances.DEEP) <= 0n) {
-    blockers.push({ code: 'INSUFFICIENT_DEEP', label: 'BalanceManager DEEP unfunded', observed: balances.DEEP, required: thresholds.DEEP.required })
-  }
-  if (BigInt(balances.SUI_MIST) <= 0n) {
-    blockers.push({ code: 'INSUFFICIENT_GAS', label: 'Agent SUI gas unavailable', observed: balances.SUI_MIST, required: thresholds.SUI_MIST.required })
-  }
+  const fundingBlockers = blockers.filter((b) => b.code !== 'EXECUTION_DISABLED')
+  const fundingReady = fundingBlockers.length === 0
 
   return {
     holder: 'agent_balance_manager',
@@ -120,9 +165,15 @@ export function buildFundingReadiness({
     execution_enabled: Boolean(executionEnabled),
     balances,
     thresholds,
+    criteria,
+    funding_state: fundingReady ? 'ready' : 'blocked',
+    funding_ready: fundingReady,
+    funding_precondition_satisfied: fundingReady,
+    execution_claimed: false,
     readiness_state: blockers.length ? 'blocked' : 'ready',
     ready: blockers.length === 0,
     blockers,
+    funding_blockers: fundingBlockers,
     blocker_labels: blockers.map((b) => b.label),
     blocker_codes: blockers.map((b) => b.code),
   }

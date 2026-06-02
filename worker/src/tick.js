@@ -6,6 +6,7 @@ import { readWrapper, readMandate, readBalanceManagerBalance } from './chain.js'
 import { buildExecutionTx } from './deepbook.js'
 import { DEPLOYMENT } from './sui-tx.js'
 import { keypairFromWorkerEnv } from './secret-safe-signer.js'
+import { buildFundingReadiness } from './read-surfaces.js'
 
 /**
  * Pure decision. No I/O.
@@ -48,23 +49,38 @@ function perTradeAmount(wrapper) {
 }
 
 async function checkFunding(client, proposed) {
-  const [dbusdcBalance, deepBalance] = await Promise.all([
+  const [dbusdcBalance, deepBalance, suiBalance] = await Promise.all([
     readBalanceManagerBalance(client, DEPLOYMENT.deepbook.dbusdc_coin_type),
     readBalanceManagerBalance(client, DEPLOYMENT.deepbook.deep_coin_type),
+    client.getBalance({ owner: DEPLOYMENT.agent.address, coinType: '0x2::sui::SUI' }),
   ])
-  const dbusdcRequired = BigInt(proposed.amount)
-  if (dbusdcBalance < dbusdcRequired) {
+  const funding = buildFundingReadiness({
+    agentAddress: DEPLOYMENT.agent.address,
+    balanceManagerId: DEPLOYMENT.agent.balance_manager_id,
+    dbusdcBalance: dbusdcBalance.toString(),
+    deepBalance: deepBalance.toString(),
+    suiBalanceMist: String(suiBalance.totalBalance ?? '0'),
+    executionEnabled: true,
+    requiredDbusdcBalance: proposed.amount,
+    requiredDeepBalance: '1',
+    requiredSuiGasMist: '1',
+  })
+  if (!funding.funding_ready) {
+    const primary = funding.funding_blockers[0]
     return {
-      code: 'INSUFFICIENT_DBUSDC',
-      detail: `Execution blocked: BalanceManager DBUSDC ${dbusdcBalance.toString()} is below required ${dbusdcRequired.toString()}.`,
-      balances: { dbusdc: dbusdcBalance.toString(), deep: deepBalance.toString(), dbusdc_required: dbusdcRequired.toString(), deep_required: '>0' },
-    }
-  }
-  if (deepBalance <= 0n) {
-    return {
-      code: 'INSUFFICIENT_DEEP',
-      detail: 'Execution blocked: BalanceManager DEEP fee balance is zero.',
-      balances: { dbusdc: dbusdcBalance.toString(), deep: deepBalance.toString(), dbusdc_required: dbusdcRequired.toString(), deep_required: '>0' },
+      code: primary.code,
+      detail: `Execution blocked: ${primary.label} (${primary.observed} observed, ${primary.required} required).`,
+      balances: {
+        dbusdc: funding.balances.DBUSDC,
+        deep: funding.balances.DEEP,
+        sui_mist: funding.balances.SUI_MIST,
+        dbusdc_required: funding.thresholds.DBUSDC.required,
+        deep_required: funding.thresholds.DEEP.required,
+        sui_mist_required: funding.thresholds.SUI_MIST.required,
+      },
+      funding,
+      blocker_codes: funding.blocker_codes,
+      blocker_labels: funding.blocker_labels,
     }
   }
   return null

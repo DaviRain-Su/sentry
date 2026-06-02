@@ -41,7 +41,63 @@ function MetaRow({ icon, iconColor, label, children, last }) {
   )
 }
 
-export function Profile({ account, holdings, policies, live = false, readOnly = false, loading = false, onNav, onToast }) {
+function shortId(id) {
+  return id && id.length > 16 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id
+}
+
+function FundingReadiness({ funding, live }) {
+  if (!live || !funding) return null
+  const rows = funding.criteria || []
+  const blocked = funding.readiness_state === 'blocked'
+  return (
+    <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+        <div>
+          <div className="card-title">Execution funding readiness</div>
+          <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 3 }}>
+            Chain-authoritative precondition only — execution is not claimed until a real Testnet tx succeeds.
+          </div>
+        </div>
+        <span className={`badge ${blocked ? 'badge-warn' : 'badge-safe'}`} style={{ fontSize: 9.5 }}>
+          <span className="dot"></span>{funding.readiness_state}
+        </span>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ color: 'var(--t2)' }}>
+            {['Holder', 'Asset', 'Threshold', 'Observed', 'Usable'].map((h) => (
+              <th key={h} style={{ textAlign: h === 'Holder' ? 'left' : 'right', padding: '7px 8px', fontSize: 9.5,
+                fontFamily: 'var(--f-mono)', fontWeight: 500, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.asset} style={{ borderTop: '1px solid var(--border)' }}>
+              <td style={{ padding: '10px 8px' }}>
+                <div className="mono" style={{ fontSize: 11.5, fontWeight: 600 }}>{r.holder_label}</div>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--t2)' }}>{shortId(r.holder)}</div>
+              </td>
+              <td className="mono" style={{ padding: '10px 8px', textAlign: 'right', fontSize: 11.5 }}>{r.asset}</td>
+              <td className="mono" style={{ padding: '10px 8px', textAlign: 'right', fontSize: 11.5 }}>{r.threshold}</td>
+              <td className="mono" style={{ padding: '10px 8px', textAlign: 'right', fontSize: 11.5 }}>{r.observed_balance}</td>
+              <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                <span className={`badge ${r.usable ? 'badge-safe' : 'badge-warn'}`} style={{ fontSize: 9 }}>{r.usable ? 'usable' : r.blocker_code}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {funding.blockers?.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+          {funding.blockers.map((b) => <span key={b.code} className="badge badge-warn" style={{ fontSize: 9 }}>{b.code}</span>)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function Profile({ account, holdings, policies, funding = null, live = false, readOnly = false, loading = false, onNav, onToast }) {
   const a = account
   const total = holdings.reduce((s, h) => s + h.value, 0)
   const free = holdings.filter(h => h.state === 'free').reduce((s, h) => s + h.value, 0)
@@ -219,6 +275,7 @@ export function Profile({ account, holdings, policies, live = false, readOnly = 
                 })}
               </tbody>
             </table>
+            <FundingReadiness funding={funding} live={live} />
           </div>
         </div>
 
