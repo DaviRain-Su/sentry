@@ -1,6 +1,7 @@
 /* ===========================================================
    RescueGrid — mock data layer
    =========================================================== */
+import { attachMarketData } from './market-data.js'
 
 export const RG = {
   user: {
@@ -289,3 +290,6 @@ export const RG = {
     gas: { sponsored: 47, saved: 0.0421, station: 'RescueGrid Gas Station' },
   },
 }
+
+// attach the Markets / catalog / risk / active / datasources demo data + taxonomies
+attachMarketData(RG)

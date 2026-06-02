@@ -3,6 +3,7 @@
    =========================================================== */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { Liveline } from 'liveline'
+import { RG } from '../data.js'
 
 /* ---------- color helper ---------- */
 export function hexToRgba(hex, a) {
@@ -47,6 +48,16 @@ export function Icon({ name, size = 18, stroke = 1.7, style }) {
     mail: <><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/></>,
     fingerprint: <><path d="M12 5a7 7 0 0 0-7 7v2M19 13v-1a7 7 0 0 0-3.5-6.06"/><path d="M9 12a3 3 0 0 1 6 0v3a4 4 0 0 1-1 2.6M12 12v4M8 16v1a4 4 0 0 0 .5 2"/></>,
     settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-2.87 1.2V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-2.87-1.2l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 13.5H4.5a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 2.87-1.2V2.5a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 2.87 1.2l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-1.2 2.87h.1a2 2 0 0 1 0 4z"/></>,
+    layers: <><path d="M12 3 3 8l9 5 9-5z"/><path d="M3 13l9 5 9-5M3 18l9 5 9-5"/></>,
+    swap: <><path d="M7 4 3 8l4 4"/><path d="M3 8h13"/><path d="M17 20l4-4-4-4"/><path d="M21 16H8"/></>,
+    globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></>,
+    droplet: <><path d="M12 3s6 5.7 6 10.5A6 6 0 0 1 6 13.5C6 8.7 12 3 12 3z"/></>,
+    flame: <><path d="M12 3c1 3 4 4.5 4 8a4 4 0 0 1-8 0c0-1.4.5-2.3 1-3 .3 1 .8 1.5 1.5 1.8C10 8 11 5.5 12 3z"/></>,
+    percent: <><path d="M19 5 5 19"/><circle cx="7.5" cy="7.5" r="2.5"/><circle cx="16.5" cy="16.5" r="2.5"/></>,
+    scale: <><path d="M12 3v18M5 7h14M5 7l-2.5 6a3 3 0 0 0 5 0L5 7zM19 7l-2.5 6a3 3 0 0 0 5 0L19 7zM8 21h8"/></>,
+    radar: <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12 19 8"/><circle cx="12" cy="12" r="1.4"/></>,
+    sun: <><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/></>,
+    moon: <><path d="M20 14.5A8 8 0 1 1 9.5 4a6.3 6.3 0 0 0 10.5 10.5z"/></>,
   }
   return <svg {...p}>{paths[name] || null}</svg>
 }
@@ -73,6 +84,44 @@ export function useAnimatedNumber(target, dur = 600) {
 
 export function fmtUsd(n, dp = 2) {
   return n.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })
+}
+
+// compact USD from a millions value, e.g. 612.4 -> "$612.4M", 1240 -> "$1.24B"
+export function fmtTvlM(m) {
+  if (m >= 1000) return '$' + (m / 1000).toFixed(2) + 'B'
+  return '$' + (m >= 100 ? m.toFixed(0) : m.toFixed(1)) + 'M'
+}
+
+// protocol monogram — gradient disc with 1-letter, matches Token style
+export function ProtoGlyph({ proto, size = 30 }) {
+  const m = (RG.protocols && RG.protocols[proto]) || { name: proto, c: '#5C6A78' }
+  return (
+    <div title={m.name} style={{ width: size, height: size, borderRadius: 9, flexShrink: 0,
+      background: `linear-gradient(135deg, ${m.c}, ${m.c}99)`, color: '#06140f',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: 'var(--f-display)', fontWeight: 700, fontSize: size * 0.42,
+      boxShadow: `0 2px 8px ${m.c}40` }}>
+      {m.name[0]}
+    </div>
+  )
+}
+
+// open the agent runtime drawer from anywhere (App listens for this)
+export function openRuntime(mode) {
+  window.dispatchEvent(new CustomEvent('rg:runtime', { detail: mode || null }))
+}
+
+// clickable mode badge → opens the runtime drawer for that mode
+export function ModeBadge({ mode, size = 9.5 }) {
+  return (
+    <button onClick={(e) => { e.stopPropagation(); openRuntime(mode) }} className="mode-badge" title="View agent runtime"
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: size, fontWeight: 600, lineHeight: 1,
+        padding: '3px 7px', borderRadius: 100, cursor: 'pointer', fontFamily: 'var(--f-body)',
+        background: 'var(--glass-2)', border: '1px solid var(--border)', color: 'var(--t1)', transition: 'all .12s' }}>
+      <Icon name={mode === 'cloud' ? 'cloud' : 'cpu'} size={10} />{mode}
+      <Icon name="chevR" size={9} style={{ opacity: 0.5 }} />
+    </button>
+  )
 }
 
 /* ---------- sparkline (Liveline-powered) ---------- */
@@ -177,6 +226,76 @@ export function Logo({ size = 30 }) {
       <div style={{ lineHeight: 1 }}>
         <div className="display" style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.01em' }}>RescueGrid</div>
       </div>
+    </div>
+  )
+}
+
+/* ---------- interactive time-axis line/area chart (hover crosshair) ---------- */
+export function TimeChart({ data, w = 460, h = 120, color = 'var(--accent)', fmt, xLabels, baseline, height }) {
+  const H = height || h
+  const [hover, setHover] = useState(null)
+  const ref = useRef(null)
+  const fmtV = fmt || ((v) => v.toFixed(2))
+  const vals = data.map(d => (typeof d === 'number' ? d : d.v))
+  const pad = { l: 6, r: 6, t: 10, b: 18 }
+  const min = Math.min(...vals), max = Math.max(...vals)
+  const rng = (max - min) || 1
+  const iw = w - pad.l - pad.r, ih = H - pad.t - pad.b
+  const X = (i) => pad.l + (i / (vals.length - 1)) * iw
+  const Y = (v) => pad.t + ih - ((v - min) / rng) * ih
+  const pts = vals.map((v, i) => [X(i), Y(v)])
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ')
+  const area = line + ` L${X(vals.length - 1).toFixed(1)} ${(pad.t + ih).toFixed(1)} L${pad.l} ${(pad.t + ih).toFixed(1)} Z`
+  const gid = 'tc' + Math.abs(vals[0] * 1000 | 0) + vals.length
+  const grid = [max, (max + min) / 2, min]
+  const baseY = baseline != null && baseline >= min && baseline <= max ? Y(baseline) : null
+
+  const onMove = (e) => {
+    const rect = ref.current.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width * w
+    let i = Math.round((x - pad.l) / iw * (vals.length - 1))
+    i = Math.max(0, Math.min(vals.length - 1, i))
+    setHover(i)
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <svg ref={ref} viewBox={`0 0 ${w} ${H}`} preserveAspectRatio="none" style={{ width: '100%', height: H, display: 'block', overflow: 'visible' }}
+        onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.26" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {grid.map((g, i) => (
+          <line key={i} x1={pad.l} y1={Y(g)} x2={w - pad.r} y2={Y(g)} stroke="var(--border)" strokeWidth="1" strokeDasharray={i === 1 ? '3 4' : '0'} opacity={i === 1 ? 0.6 : 1} />
+        ))}
+        {baseY != null && <line x1={pad.l} y1={baseY} x2={w - pad.r} y2={baseY} stroke="var(--t3)" strokeWidth="1" strokeDasharray="2 3" />}
+        <path d={area} fill={`url(#${gid})`} />
+        <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {hover != null && (
+          <>
+            <line x1={pts[hover][0]} y1={pad.t} x2={pts[hover][0]} y2={pad.t + ih} stroke="var(--border-hi)" strokeWidth="1" />
+            <circle cx={pts[hover][0]} cy={pts[hover][1]} r="4" fill={color} stroke="var(--bg-2)" strokeWidth="2" />
+          </>
+        )}
+      </svg>
+      <div style={{ position: 'absolute', top: pad.t - 6, left: 8, fontSize: 9, fontFamily: 'var(--f-mono)', color: 'var(--t3)' }}>{fmtV(max)}</div>
+      <div style={{ position: 'absolute', bottom: pad.b - 4, left: 8, fontSize: 9, fontFamily: 'var(--f-mono)', color: 'var(--t3)' }}>{fmtV(min)}</div>
+      {xLabels && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: -12, padding: '0 6px' }}>
+          <span className="mono" style={{ fontSize: 9, color: 'var(--t3)' }}>{xLabels[0]}</span>
+          <span className="mono" style={{ fontSize: 9, color: 'var(--t3)' }}>{xLabels[1]}</span>
+        </div>
+      )}
+      {hover != null && (
+        <div style={{ position: 'absolute', top: 0, left: `${pts[hover][0] / w * 100}%`, transform: 'translate(-50%,0)', marginLeft: -28,
+          pointerEvents: 'none', background: 'var(--bg-3)', border: '1px solid var(--border-hi)', borderRadius: 6, padding: '4px 8px',
+          fontFamily: 'var(--f-mono)', fontSize: 10.5, fontWeight: 600, color: 'var(--t0)', whiteSpace: 'nowrap', boxShadow: '0 6px 18px -6px rgba(0,0,0,0.5)' }}>
+          {fmtV(vals[hover])}
+        </div>
+      )}
     </div>
   )
 }
