@@ -6,6 +6,8 @@
 //
 // Usage:
 //   node worker/scripts/validate-policy-loop.mjs [--worker-url http://localhost:8787]
+//   node worker/scripts/validate-policy-loop.mjs --pause-before-revoke-ms 120000
+//   node worker/scripts/validate-policy-loop.mjs --active-checkpoint-only
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
 import { Transaction } from '@mysten/sui/transactions'
@@ -19,13 +21,44 @@ for (let i = 2; i < process.argv.length; i += 1) {
   const arg = process.argv[i]
   if (arg.startsWith('--')) {
     const [k, inlineValue] = arg.split('=')
-    args.set(k, inlineValue ?? process.argv[i + 1])
-    if (inlineValue == null) i += 1
+    const nextValue = process.argv[i + 1]
+    if (inlineValue != null) {
+      args.set(k, inlineValue)
+    } else if (nextValue && !nextValue.startsWith('--')) {
+      args.set(k, nextValue)
+      i += 1
+    } else {
+      args.set(k, 'true')
+    }
   }
+}
+
+if (args.has('--help') || process.argv.includes('-h')) {
+  console.log(`Validate the live Sui Testnet RescueGrid policy write loop.
+
+Usage:
+  node worker/scripts/validate-policy-loop.mjs [options]
+
+Options:
+  --worker-url <url>              Worker URL (default: WORKER_URL or http://localhost:8787)
+  --pause-before-revoke-ms <ms>   Hold after active create evidence before revoking the same policy
+  --hold-before-revoke-ms <ms>    Alias for --pause-before-revoke-ms
+  --active-checkpoint-only        Create and verify active evidence, then exit before revoke
+  --stop-after-create             Alias for --active-checkpoint-only
+  --help, -h                      Print this help
+
+All evidence is secret-safe: the script prints public addresses, object IDs, tx digests,
+strategy hashes, endpoints, and comparison summaries only.`)
+  process.exit(0)
 }
 
 const workerUrl = String(args.get('--worker-url') || process.env.WORKER_URL || 'http://localhost:8787').replace(/\/$/, '')
 const expectedChain = 'sui:testnet'
+const activeCheckpointOnly = args.has('--active-checkpoint-only') || args.has('--stop-after-create')
+const pauseBeforeRevokeMs = parseNonNegativeInteger(
+  args.get('--pause-before-revoke-ms') ?? args.get('--hold-before-revoke-ms') ?? '0',
+  'pause before revoke',
+)
 
 function fail(message, details = undefined) {
   const suffix = details == null ? '' : `\n${JSON.stringify(details, null, 2)}`
@@ -34,6 +67,17 @@ function fail(message, details = undefined) {
 
 function assert(condition, message, details = undefined) {
   if (!condition) fail(message, details)
+}
+
+function parseNonNegativeInteger(value, label) {
+  const parsed = Number(value)
+  assert(Number.isSafeInteger(parsed) && parsed >= 0, `Invalid ${label} milliseconds`, { value })
+  return parsed
+}
+
+function shortObjectId(id) {
+  if (!id || id.length <= 14) return id
+  return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
 function txMeta(tx) {
@@ -280,6 +324,69 @@ console.log(JSON.stringify({
   owner_activity_create_tx: apiActivityAfterCreate.ownerItem.tx,
   per_policy_event_types: apiActivityAfterCreate.detailActivity.events.map((e) => ({ type: e.type, tx: e.tx, timestamp_ms: e.timestamp_ms })),
 }, null, 2))
+
+const activeCheckpointEvidence = {
+  phase: 'active_checkpoint',
+  evidence_purpose: 'Capture browser/API/UI evidence while this current-run policy is active before revoke.',
+  worker_url: workerUrl,
+  current_run_marker: currentRunMarker,
+  owner: ownerAddress,
+  wrapper_id: wrapperId,
+  wrapper_short_id: shortObjectId(wrapperId),
+  mandate_id: mandateId,
+  mandate_short_id: shortObjectId(mandateId),
+  strategy_hash: strategy.strategy_hash,
+  create_tx_digest: createResolved.digest,
+  expected_status: 'active',
+  expected_runtime_state: 'Monitoring',
+  ui_acceptance_hint: 'Dashboard evidence must show this wrapper/mandate ID or the exact shortened form while status is active.',
+  endpoints: {
+    policies: `/api/policies?owner=${ownerAddress}`,
+    owner_activity: `/api/activity?owner=${ownerAddress}`,
+    policy_activity: `/api/policies/${wrapperId}/activity`,
+  },
+}
+console.log(JSON.stringify(activeCheckpointEvidence, null, 2))
+
+if (pauseBeforeRevokeMs > 0) {
+  console.log(JSON.stringify({
+    phase: 'pause_before_revoke',
+    duration_ms: pauseBeforeRevokeMs,
+    resume_after_ms_epoch: Date.now() + pauseBeforeRevokeMs,
+    wrapper_id: wrapperId,
+    mandate_id: mandateId,
+    strategy_hash: strategy.strategy_hash,
+  }, null, 2))
+  await delay(pauseBeforeRevokeMs)
+}
+
+if (activeCheckpointOnly) {
+  console.log(JSON.stringify({
+    phase: 'pass',
+    mode: 'active_checkpoint_only',
+    assertions: [
+      'VAL-POLICY-001',
+      'VAL-POLICY-002',
+      'VAL-POLICY-003',
+      'VAL-POLICY-004',
+      'VAL-POLICY-005',
+      'VAL-POLICY-011',
+      'VAL-POLICY-012',
+      'VAL-POLICY-013',
+      'VAL-POLICY-014',
+      'VAL-CROSS-001',
+    ],
+    current_run_marker: currentRunMarker,
+    wrapper_id: wrapperId,
+    wrapper_short_id: shortObjectId(wrapperId),
+    mandate_id: mandateId,
+    mandate_short_id: shortObjectId(mandateId),
+    create_tx_digest: createResolved.digest,
+    strategy_hash: strategy.strategy_hash,
+    note: 'Policy intentionally left active for browser evidence; run the full validator or Worker revoke path for revoked-state evidence.',
+  }, null, 2))
+  process.exit(0)
+}
 
 const revokeBuilt = await postJson(`/api/policies/${wrapperId}/revoke`, {
   owner: ownerAddress,
