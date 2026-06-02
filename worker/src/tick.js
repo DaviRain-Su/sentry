@@ -2,7 +2,7 @@
 // runTick() adds chain I/O + (gated) execution. Allowed actions (docs §7):
 // no_op | blocked | executed | stopped_revoked | stopped_expired | error.
 import { runGuardian } from './guardian.js'
-import { readWrapper, readMandate } from './chain.js'
+import { readWrapper, readMandate, readBalanceManagerBalance } from './chain.js'
 import { buildExecutionTx } from './deepbook.js'
 import { DEPLOYMENT } from './sui-tx.js'
 
@@ -27,7 +27,12 @@ export function decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, exec
     return { action: 'blocked', reason: guardian.reason, detail: `Guardian blocked: ${guardian.label} — ${guardian.detail}`, guardian }
   }
   if (!executionEnabled) {
-    return { action: 'no_op', detail: 'Trigger met + Guardian passed, but execution is disabled (BalanceManager unfunded — pending DBUSDC).', guardian }
+    return {
+      action: 'blocked',
+      code: 'EXECUTION_DISABLED',
+      detail: 'Execution blocked: EXECUTION_ENABLED is false or the agent key is unavailable; usable DBUSDC/DEEP funding must be verified before live execution.',
+      guardian,
+    }
   }
   return { action: 'execute', detail: 'Trigger met + Guardian passed; executing rescue order.', guardian }
 }
@@ -39,6 +44,29 @@ function perTradeAmount(wrapper) {
   const remaining = ceiling > spent ? ceiling - spent : 0n
   const rung = ceiling / 5n
   return (rung < remaining ? rung : remaining)
+}
+
+async function checkFunding(client, proposed) {
+  const [dbusdcBalance, deepBalance] = await Promise.all([
+    readBalanceManagerBalance(client, DEPLOYMENT.deepbook.dbusdc_coin_type),
+    readBalanceManagerBalance(client, DEPLOYMENT.deepbook.deep_coin_type),
+  ])
+  const dbusdcRequired = BigInt(proposed.amount)
+  if (dbusdcBalance < dbusdcRequired) {
+    return {
+      code: 'INSUFFICIENT_DBUSDC',
+      detail: `Execution blocked: BalanceManager DBUSDC ${dbusdcBalance.toString()} is below required ${dbusdcRequired.toString()}.`,
+      balances: { dbusdc: dbusdcBalance.toString(), deep: deepBalance.toString(), dbusdc_required: dbusdcRequired.toString(), deep_required: '>0' },
+    }
+  }
+  if (deepBalance <= 0n) {
+    return {
+      code: 'INSUFFICIENT_DEEP',
+      detail: 'Execution blocked: BalanceManager DEEP fee balance is zero.',
+      balances: { dbusdc: dbusdcBalance.toString(), deep: deepBalance.toString(), dbusdc_required: dbusdcRequired.toString(), deep_required: '>0' },
+    }
+  }
+  return null
 }
 
 /**
@@ -66,6 +94,11 @@ export async function runTick(env, p) {
 
   const decision = decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, executionEnabled })
   if (decision.action !== 'execute') return { ...decision, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
+
+  const fundingBlock = await checkFunding(client, proposed)
+  if (fundingBlock) {
+    return { action: 'blocked', ...fundingBlock, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
+  }
 
   // execute: build + sign + submit (only reached when executionEnabled)
   try {

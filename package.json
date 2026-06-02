@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "config": "node scripts/demo-config.mjs"
+    "config": "node scripts/demo-config.mjs",
+    "baseline:smoke": "node scripts/baseline-smoke.mjs"
   },
   "dependencies": {
     "@mysten/dapp-kit": "^1.0.6",

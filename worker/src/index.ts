@@ -20,6 +20,7 @@ export interface Env {
   AGENT_KEY?: string
   INTERNAL_AGENT_TICK_TOKEN?: string
   RESCUEGRID_DEMO_MODE?: string
+  EXECUTION_ENABLED?: string
 }
 
 const app = new Hono<{ Bindings: Env }>()

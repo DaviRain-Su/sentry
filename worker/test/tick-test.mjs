@@ -24,7 +24,9 @@ check('expired -> stopped_expired', run({ nowMs: 20_000 }).action, 'stopped_expi
 check('no trigger -> no_op', run({ triggerMet: false }).action, 'no_op')
 check('guardian block -> blocked', run({ proposed: { pool_id: '0xPOOL', amount: '100000', estimated_slippage_bps: 150 } }).action, 'blocked')
 check('trigger+pass+enabled -> execute', run({}).action, 'execute')
-check('trigger+pass+disabled -> no_op (gated)', run({ executionEnabled: false }).action, 'no_op')
+const disabled = run({ executionEnabled: false })
+check('trigger+pass+disabled -> blocked (gated)', disabled.action, 'blocked')
+check('disabled gate uses stable code', disabled.code, 'EXECUTION_DISABLED')
 // precedence: revoked before trigger/execute
 check('revoked beats execute', run({ mandate: { id: MID, revoked: true, expires_at_ms: 10_000 }, executionEnabled: true }).action, 'stopped_revoked')
 

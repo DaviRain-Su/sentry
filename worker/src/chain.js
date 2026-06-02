@@ -4,6 +4,7 @@
 // from chain here; once the Durable Object (E5) runs it supplies the live state
 // and runtime_state_stale flips when it disagrees with chain.
 import { getClient, DEPLOYMENT } from './sui-tx.js'
+import { Transaction } from '@mysten/sui/transactions'
 
 const RG = DEPLOYMENT.rescuegrid
 
@@ -138,6 +139,23 @@ export async function getBalances(owner) {
     out.push({ sym: s[0], amount, price: price[s[0]], value: amount * price[s[0]], role: 'Wallet', state: 'free' })
   }
   return out
+}
+
+/** Read a DeepBook BalanceManager token balance without submitting a tx. */
+export async function readBalanceManagerBalance(client, coinType, sender = DEPLOYMENT.agent.address) {
+  const tx = new Transaction()
+  tx.moveCall({
+    target: `${DEPLOYMENT.deepbook.package_id}::balance_manager::balance`,
+    typeArguments: [coinType],
+    arguments: [tx.object(DEPLOYMENT.agent.balance_manager_id)],
+  })
+  const inspected = await client.devInspectTransactionBlock({ sender, transactionBlock: tx })
+  const ret = inspected.results?.[0]?.returnValues?.[0]
+  if (!ret) return 0n
+  let value = 0n
+  const bytes = ret[0]
+  for (let i = bytes.length - 1; i >= 0; i--) value = (value << 8n) + BigInt(bytes[i])
+  return value
 }
 
 /** Live market snapshot from the DeepBook testnet indexer (ticker + recent trades). */
