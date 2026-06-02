@@ -49,9 +49,13 @@ async function workerGet(path) {
 }
 
 async function read(path, fallback) {
-  if (!WORKER_CONFIGURED) return fallback()
+  if (!WORKER_CONFIGURED) {
+    const result = await fallback()
+    return { ...result, source: 'chain_fallback', worker_error: 'WORKER_NOT_CONFIGURED' }
+  }
   try {
-    return await workerGet(path)
+    const result = await workerGet(path)
+    return { ...result, source: 'worker' }
   } catch (e) {
     const result = await fallback()
     return { ...result, source: 'chain_fallback', worker_error: String(e?.message || e) }

@@ -26,10 +26,16 @@ function CapRow({ granted, label, fn }) {
   )
 }
 
-export function PolicyInspect({ p, activity, onClose, onRevoke, onTx }) {
+export function PolicyInspect({ p, activity, onClose, onRevoke, onTx, readOnly = false }) {
   const pct = Math.round((p.budgetUsed / p.budgetCap) * 100)
-  const log = activity.filter(a => a.policy === p.name)
+  const log = activity.filter(a => a.policy === p.name || a.policy === p.id)
   const expiryMs = new Date(p.expires).getTime()
+  const statusMeta = {
+    active: { cls: 'badge-safe', label: 'active', pulse: true },
+    revoked: { cls: 'badge-danger', label: 'revoked', pulse: false },
+    expired: { cls: 'badge-warn', label: 'expired', pulse: false },
+    paused: { cls: 'badge-neutral', label: 'paused', pulse: false },
+  }[p.status] || { cls: 'badge-neutral', label: p.status || 'unknown', pulse: false }
 
   const protocols = [
     { name: 'Deepbook v3', kind: 'CLOB · spot', on: p.scope.length > 0, note: 'order book — place / cancel limit orders' },
@@ -67,8 +73,8 @@ export function PolicyInspect({ p, activity, onClose, onRevoke, onTx }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                 <span className="mono" style={{ fontSize: 11.5, color: 'var(--sui)' }}>{p.id}</span>
                 <span className="badge badge-neutral" style={{ fontSize: 9.5 }}><Icon name={p.mode === 'cloud' ? 'cloud' : 'cpu'} size={10} />{p.mode}</span>
-                <span className={`badge ${p.status === 'active' ? 'badge-safe' : 'badge-warn'}`} style={{ fontSize: 9.5 }}>
-                  <span className={`dot ${p.status === 'active' ? 'pulse' : ''}`}></span>{p.status}</span>
+                <span className={`badge ${statusMeta.cls}`} style={{ fontSize: 9.5 }}>
+                  <span className={`dot ${statusMeta.pulse ? 'pulse' : ''}`}></span>{statusMeta.label}</span>
               </div>
             </div>
             <button onClick={onClose} className="btn btn-sm btn-ghost" style={{ padding: 8 }}><Icon name="x" size={16} /></button>
@@ -189,8 +195,8 @@ export function PolicyInspect({ p, activity, onClose, onRevoke, onTx }) {
         {/* footer revoke */}
         <div style={{ position: 'sticky', bottom: 0, background: 'var(--bg-2)', borderTop: '1px solid var(--border)', padding: '16px 24px', display: 'flex', gap: 10 }}>
           <button className="btn btn-ghost" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Close</button>
-          <button className="btn btn-danger" style={{ flex: 1, justifyContent: 'center' }} onClick={() => { onRevoke(p.id); onClose() }}>
-            <Icon name="x" size={15} stroke={2.4} /> Revoke authority
+          <button className="btn btn-danger" disabled={readOnly || p.status === 'revoked'} style={{ flex: 1, justifyContent: 'center', opacity: readOnly || p.status === 'revoked' ? 0.55 : 1 }} onClick={() => { onRevoke(p.id); onClose() }}>
+            <Icon name="x" size={15} stroke={2.4} /> {readOnly ? 'Read-only mode' : p.status === 'revoked' ? 'Already revoked' : 'Revoke authority'}
           </button>
         </div>
       </div>

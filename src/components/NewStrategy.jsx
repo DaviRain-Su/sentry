@@ -8,6 +8,7 @@ import { Icon, Sparkline } from './primitives.jsx'
 import { WORKER_CONFIGURED, parseIntent as parseWorkerIntent, getSuiPriceHistory } from '../api.js'
 import { parseIntent as parseLocalIntent } from '../../core/strategy.js'
 import { runBacktest } from '../../core/backtest.js'
+import deployment from '../../core/deployment.js'
 
 function Stepper({ step, steps }) {
   return (
@@ -66,7 +67,10 @@ export function NewStrategy({ onDone, mode, setMode }) {
   const [livePreviewSource, setLivePreviewSource] = useState(null)
   const [liveBacktest, setLiveBacktest] = useState(null)
   const account = useCurrentAccount()
-  const live = !!account
+  const workerPreview = WORKER_CONFIGURED
+  const live = !!account || workerPreview
+  const readOnlyPreview = !account && workerPreview
+  const previewOwner = account?.address || deployment.agent.address
   const steps = ['Intent', 'Review', 'Policy', 'Deploy']
   const PARSED = { safe: RG.parsed, dca: RG.parsedDCA, hedge: RG.parsedHedge, risky: RG.parsedRisky }
   const P = PARSED[scenario]
@@ -88,13 +92,13 @@ export function NewStrategy({ onDone, mode, setMode }) {
     const sc = classify(text)
     const m = PARSED[sc].meta
     if (live) {
-      // Worker-first parse; local parser is only a fallback when no Worker URL is configured.
+      // Worker-first parse; local parser is only a fallback when a connected wallet has no Worker URL configured.
       try {
-        const preview = WORKER_CONFIGURED
-          ? await parseWorkerIntent(account.address, text)
-          : parseLocalIntent(text, account.address)
+        const preview = workerPreview
+          ? await parseWorkerIntent(previewOwner, text)
+          : parseLocalIntent(text, previewOwner)
         setLivePreview(preview)
-        setLivePreviewSource(WORKER_CONFIGURED ? 'Worker' : 'local fallback')
+        setLivePreviewSource(workerPreview ? 'Worker' : 'local fallback')
         if (preview?.status === 'ok' && preview.strategy) {
           const th = Number(preview.strategy.trigger?.threshold_pct) || 8
           const bud = preview.strategy.budget_ceiling ? Number(preview.strategy.budget_ceiling) / 1e6 : budget
@@ -413,15 +417,19 @@ export function NewStrategy({ onDone, mode, setMode }) {
                 <Icon name="link" size={18} />
               </div>
               <div>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>One signature creates the Policy Object</div>
-                <div style={{ fontSize: 12, color: 'var(--t2)' }}>After this, the agent acts autonomously within limits — no more signing.</div>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{readOnlyPreview ? 'Read-only Worker preview' : 'One signature creates the Policy Object'}</div>
+                <div style={{ fontSize: 12, color: 'var(--t2)' }}>
+                  {readOnlyPreview
+                    ? 'The parsed intent, PTB preview and Guardian output came from the live Worker. Connect a Sui wallet only when you want to sign and deploy.'
+                    : 'After this, the agent acts autonomously within limits — no more signing.'}
+                </div>
               </div>
             </div>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button className="btn btn-ghost" onClick={() => setStep(2)}><Icon name="chevL" size={15} /> Back</button>
-            <button className="btn btn-primary" onClick={() => onDone(meta, text)}><Icon name="shield" size={15} /> Sign &amp; deploy policy</button>
+            <button className="btn btn-primary" onClick={() => onDone(meta, text)}><Icon name="shield" size={15} /> {readOnlyPreview ? 'Preview only · connect wallet' : 'Sign & deploy policy'}</button>
           </div>
         </div>
       )}

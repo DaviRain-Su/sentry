@@ -40,7 +40,7 @@ function MetaRow({ icon, iconColor, label, children, last }) {
   )
 }
 
-export function Profile({ account, holdings, policies, live = false, loading = false, onNav, onToast }) {
+export function Profile({ account, holdings, policies, live = false, readOnly = false, loading = false, onNav, onToast }) {
   const a = account
   const total = holdings.reduce((s, h) => s + h.value, 0)
   const free = holdings.filter(h => h.state === 'free').reduce((s, h) => s + h.value, 0)
@@ -76,11 +76,11 @@ export function Profile({ account, holdings, policies, live = false, loading = f
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <h2 className="display mono" style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.01em' }}>{a.handle}</h2>
-              <span className="badge badge-sui" style={{ fontSize: 10 }}><Icon name="shield" size={11} /> {live ? 'wallet connected' : 'zkLogin verified'}</span>
+              <span className="badge badge-sui" style={{ fontSize: 10 }}><Icon name="shield" size={11} /> {readOnly ? 'read-only Worker' : live ? 'wallet connected' : 'zkLogin verified'}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 7, color: 'var(--t2)', fontSize: 12.5, flexWrap: 'wrap' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <Icon name={live ? 'wallet' : 'mail'} size={13} /> {live ? `${a.provider} · testnet` : `${a.provider} · ${a.email}`}
+                <Icon name={live ? 'wallet' : 'mail'} size={13} /> {readOnly ? `${a.provider} · Testnet read surfaces` : live ? `${a.provider} · testnet` : `${a.provider} · ${a.email}`}
               </span>
               {a.memberSince && <><span style={{ color: 'var(--t3)' }}>•</span><span>Member since {a.memberSince}</span></>}
             </div>
@@ -229,7 +229,7 @@ export function Profile({ account, holdings, policies, live = false, loading = f
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ color: 'var(--sui)' }}><Icon name={live ? 'wallet' : 'fingerprint'} size={16} /></span>
-                <div className="card-title">{live ? 'Wallet session' : 'zkLogin session'}</div>
+            <div className="card-title">{readOnly ? 'Worker read-only session' : live ? 'Wallet session' : 'zkLogin session'}</div>
               </div>
               <span className="badge badge-safe" style={{ fontSize: 9.5 }}><span className="dot pulse"></span>active</span>
             </div>
@@ -238,7 +238,7 @@ export function Profile({ account, holdings, policies, live = false, loading = f
                 <MetaRow icon="wallet" iconColor="var(--sui)" label="Wallet">
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>{a.provider}</span>
                 </MetaRow>
-                <MetaRow icon="key" iconColor="var(--accent)" label="Sui address">
+                <MetaRow icon="key" iconColor="var(--accent)" label={readOnly ? 'Read owner' : 'Sui address'}>
                   <span className="mono" style={{ fontSize: 12, color: 'var(--sui)', fontWeight: 600 }}>{a.addr}</span>
                 </MetaRow>
                 <MetaRow icon="shield" label="Network" last>
@@ -247,7 +247,9 @@ export function Profile({ account, holdings, policies, live = false, loading = f
                 <div style={{ display: 'flex', gap: 9, marginTop: 12, padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--glass)' }}>
                   <span style={{ color: 'var(--sui)', flexShrink: 0, marginTop: 1 }}><Icon name="eye" size={14} /></span>
                   <div style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--t1)' }}>
-                    Connected via the <strong style={{ color: 'var(--t0)' }}>Sui wallet standard</strong>. Your keys never leave the wallet; the agent only gets a scoped Policy Object.
+                    {readOnly
+                      ? <>Loaded through the <strong style={{ color: 'var(--t0)' }}>live local Worker</strong> without wallet signing. Any direct-chain fallback is read-only and explicitly labeled in the app shell.</>
+                      : <>Connected via the <strong style={{ color: 'var(--t0)' }}>Sui wallet standard</strong>. Your keys never leave the wallet; the agent only gets a scoped Policy Object.</>}
                   </div>
                 </div>
               </>
@@ -312,14 +314,14 @@ export function Profile({ account, holdings, policies, live = false, loading = f
                 <span style={{ color: 'var(--warn)' }}><Icon name="bolt" size={16} /></span>
                 <div className="card-title">{live ? 'Gas & fees' : 'Gas station'}{live && advisory}</div>
               </div>
-              <span className="badge badge-warn" style={{ fontSize: 9.5 }}>{live ? 'self-paid' : 'sponsored'}</span>
+              <span className="badge badge-warn" style={{ fontSize: 9.5 }}>{readOnly ? 'read-only' : live ? 'self-paid' : 'sponsored'}</span>
             </div>
             {live ? (
               <>
                 <div style={{ display: 'flex', gap: 12 }}>
                   <div style={{ flex: 1 }}>
                     <div className="mono display" style={{ fontSize: 22, fontWeight: 600 }}>{suiBal != null ? suiBal.toFixed(3) : '—'}</div>
-                    <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: 2 }}>SUI in wallet · your gas</div>
+                    <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: 2 }}>{readOnly ? 'SUI at read owner · gas evidence' : 'SUI in wallet · your gas'}</div>
                   </div>
                   <div style={{ width: 1, background: 'var(--border)' }} />
                   <div style={{ flex: 1 }}>
@@ -328,7 +330,9 @@ export function Profile({ account, holdings, policies, live = false, loading = f
                   </div>
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--t2)', marginTop: 12, lineHeight: 1.45 }}>
-                  You sign and pay gas from your own wallet. The autonomous agent pays its execution gas from a dedicated key, only within what your policies authorize — no custodial gas station.
+                  {readOnly
+                    ? 'No wallet is connected in this validation mode. Gas and balance panels are Worker-backed Testnet reads only; signing or deployment stays unavailable until a wallet connects.'
+                    : 'You sign and pay gas from your own wallet. The autonomous agent pays its execution gas from a dedicated key, only within what your policies authorize — no custodial gas station.'}
                 </div>
               </>
             ) : (

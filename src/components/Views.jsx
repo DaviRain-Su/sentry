@@ -108,7 +108,7 @@ export function ActivityView({ activity, onTx, live = false, loading = false }) 
   )
 }
 
-function PolicyCard({ p, onRevoke, onInspect }) {
+function PolicyCard({ p, onRevoke, onInspect, readOnly = false }) {
   const pct = Math.round((p.budgetUsed / p.budgetCap) * 100)
   const stratMeta = {
     'rescue-grid': { icon: 'grid', label: 'Rescue Grid', c: 'var(--accent)' },
@@ -117,6 +117,12 @@ function PolicyCard({ p, onRevoke, onInspect }) {
   }[p.strategy]
   const days = Math.max(0, Math.ceil((new Date(p.expires) - new Date('2026-06-01')) / 86400000))
   const active = p.status === 'active'
+  const statusMeta = {
+    active: { cls: 'badge-safe', label: 'active', pulse: true },
+    revoked: { cls: 'badge-danger', label: 'revoked', pulse: false },
+    expired: { cls: 'badge-warn', label: 'expired', pulse: false },
+    paused: { cls: 'badge-neutral', label: 'paused', pulse: false },
+  }[p.status] || { cls: 'badge-neutral', label: p.status || 'unknown', pulse: false }
   return (
     <div className="card" style={{ padding: 20, opacity: active ? 1 : 0.72 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
@@ -133,8 +139,8 @@ function PolicyCard({ p, onRevoke, onInspect }) {
             </div>
           </div>
         </div>
-        <span className={`badge ${active ? 'badge-safe' : 'badge-warn'}`}>
-          <span className={`dot ${active ? 'pulse' : ''}`}></span>{active ? 'active' : 'paused'}</span>
+        <span className={`badge ${statusMeta.cls}`}>
+          <span className={`dot ${statusMeta.pulse ? 'pulse' : ''}`}></span>{statusMeta.label}</span>
       </div>
 
       {/* budget bar */}
@@ -168,14 +174,15 @@ function PolicyCard({ p, onRevoke, onInspect }) {
           <Icon name="clock" size={12} style={{ verticalAlign: -2, marginRight: 4 }} />expires in {days}d</span>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-sm btn-ghost" onClick={() => onInspect(p)}><Icon name="eye" size={13} /> Inspect</button>
-          <button className="btn btn-sm btn-danger" onClick={() => onRevoke(p.id)}><Icon name="x" size={13} stroke={2.4} /> Revoke</button>
+          <button className="btn btn-sm btn-danger" disabled={readOnly || p.status === 'revoked'} onClick={() => onRevoke(p.id)} style={{ opacity: readOnly || p.status === 'revoked' ? 0.55 : 1 }}>
+            <Icon name="x" size={13} stroke={2.4} /> {readOnly ? 'Read-only' : p.status === 'revoked' ? 'Revoked' : 'Revoke'}</button>
         </div>
       </div>
     </div>
   )
 }
 
-export function PoliciesView({ policies, onRevoke, onInspect, live = false, loading = false }) {
+export function PoliciesView({ policies, onRevoke, onInspect, live = false, readOnly = false, loading = false }) {
   const totalCap = policies.reduce((s, p) => s + p.budgetCap, 0)
   const totalUsed = policies.reduce((s, p) => s + p.budgetUsed, 0)
   return (
@@ -208,7 +215,7 @@ export function PoliciesView({ policies, onRevoke, onInspect, live = false, load
       )}
       {!loading && policies.length > 0 && (
         <div className="rg-2col">
-          {policies.map(p => <PolicyCard key={p.id} p={p} onRevoke={onRevoke} onInspect={onInspect} />)}
+          {policies.map(p => <PolicyCard key={p.id} p={p} onRevoke={onRevoke} onInspect={onInspect} readOnly={readOnly} />)}
         </div>
       )}
     </div>

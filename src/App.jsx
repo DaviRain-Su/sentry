@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useCurrentAccount, useCurrentWallet, useSuiClient, useSignAndExecuteTransaction, useDisconnectWallet } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { RG } from './data.js'
+import deployment from '../core/deployment.js'
 import {
   WORKER_CONFIGURED,
   parseIntent,
@@ -79,8 +80,14 @@ export default function App({ onExit }) {
   const { mutateAsync: signAndExec } = useSignAndExecuteTransaction()
   const { mutate: disconnect } = useDisconnectWallet()
   const liveMode = !!account
-  const owner = account?.address || RG.user.addr
-  const ownerShort = account ? owner.slice(0, 6) + '…' + owner.slice(-4) : RG.user.handle
+  const readOnlyLiveMode = !account && WORKER_CONFIGURED
+  const liveReadsEnabled = liveMode || readOnlyLiveMode
+  const owner = account?.address || (readOnlyLiveMode ? deployment.agent.address : RG.user.addr)
+  const ownerShort = account
+    ? owner.slice(0, 6) + '…' + owner.slice(-4)
+    : readOnlyLiveMode
+      ? `agent ${owner.slice(0, 6)}…${owner.slice(-4)}`
+      : RG.user.handle
 
   // apply accent tweak to CSS vars
   useEffect(() => {
@@ -169,7 +176,7 @@ export default function App({ onExit }) {
   const mapLivePolicy = (p, spentUnits = 0, status = 'active') => ({
     id: p.wrapper_id.slice(0, 6) + '…' + p.wrapper_id.slice(-4),
     _wrapperId: p.wrapper_id, _mandateId: p.mandate_id,
-    name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', status: status === 'active' ? 'active' : 'paused', mode,
+    name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', status: ['active', 'revoked', 'expired', 'paused'].includes(status) ? status : 'paused', mode,
     budgetCap: Number(p.budget_ceiling) / 1e6, budgetUsed: Number(spentUnits) / 1e6,
     scope: ['SUI/USDC'], maxSlippage: p.max_slippage_bps / 100,
     expires: new Date(Number(p.expires_at_ms)).toISOString(), created: '2026-06-02', execs: 0,
@@ -180,28 +187,41 @@ export default function App({ onExit }) {
   const [liveMarket, setLiveMarket] = useState(null)
   const [liveHoldings, setLiveHoldings] = useState([])
   const [liveLoading, setLiveLoading] = useState(false)
+  const [liveReadMeta, setLiveReadMeta] = useState({ source: null, error: null })
   const refreshLivePolicies = async () => {
-    if (!liveMode) return
+    if (!liveReadsEnabled) return
     setLiveLoading(true)
     try {
       const [pr, ar, sr, mr, br] = await Promise.all([listPolicies(owner), listActivity(owner), getSummary(owner), getMarket(), getBalances(owner)])
+      const results = [pr, ar, sr, mr, br]
+      const fallback = results.find(r => r?.source === 'chain_fallback')
+      const worker = results.find(r => r?.source === 'worker')
+      setLiveReadMeta({ source: fallback ? 'chain_fallback' : worker ? 'worker' : null, error: fallback?.worker_error || null })
       if (sr.status === 'ok') setLiveSummary(sr.summary)
+      else setLiveSummary({ active_policies: 0, total_policies: 0, total_authorized: 0, total_deployed: 0, positions: [] })
       if (pr.status === 'ok') {
-        // enrich each policy with real spend + status from the summary, drop revoked
+        // enrich each policy with real spend + chain-derived status; do not hide revoked/terminal policies.
         const pos = {}
         if (sr.status === 'ok') sr.summary.positions.forEach(po => { pos[po.wrapper_id] = po })
         const live = pr.policies
-          .filter(p => (pos[p.wrapper_id]?.status ?? 'active') !== 'revoked')
           .map(p => mapLivePolicy(p, pos[p.wrapper_id]?.spent_amount ?? 0, pos[p.wrapper_id]?.status ?? 'active'))
         setPolicies(live)
-      }
+      } else setPolicies([])
       if (ar.status === 'ok') setLiveActivity(ar.activity)
+      else setLiveActivity([])
       if (mr.status === 'ok') setLiveMarket(mr.market)
       if (br.status === 'ok') setLiveHoldings(br.holdings)
-    } catch { /* keep current */ }
+      else setLiveHoldings([])
+    } catch (e) {
+      setPolicies([])
+      setLiveActivity([])
+      setLiveHoldings([])
+      setLiveSummary({ active_policies: 0, total_policies: 0, total_authorized: 0, total_deployed: 0, positions: [] })
+      setLiveReadMeta({ source: 'error', error: String(e?.message || e) })
+    }
     finally { setLiveLoading(false) }
   }
-  useEffect(() => { if (liveMode && authed) refreshLivePolicies() }, [liveMode, authed])
+  useEffect(() => { if (liveReadsEnabled && authed) refreshLivePolicies() }, [liveReadsEnabled, authed, owner])
 
   const handleRevoke = async (id) => {
     if (liveMode) {
@@ -218,6 +238,10 @@ export default function App({ onExit }) {
       } catch (e) {
         showToast(`Revoke failed: ${String(e?.message || e).slice(0, 80)}`, 'var(--danger)')
       }
+      return
+    }
+    if (readOnlyLiveMode) {
+      showToast('Read-only live Worker mode — connect a wallet to revoke on-chain', 'var(--warn)')
       return
     }
     setPolicies(ps => ps.filter(p => p.id !== id))
@@ -277,6 +301,10 @@ export default function App({ onExit }) {
       if (!WORKER_CONFIGURED) { showToast('On-chain deploy needs the Worker — set VITE_WORKER_URL and run it', 'var(--warn)'); return }
       deployLive(text, meta); return
     }
+    if (readOnlyLiveMode) {
+      showToast('Worker preview is read-only — connect a Sui wallet to sign and deploy', 'var(--warn)')
+      return
+    }
     const np = { id: '0x' + Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6),
       name: meta.name, strategy: meta.strategy, status: 'active', mode, budgetCap: meta.budget, budgetUsed: 0,
       scope: [meta.scope], maxSlippage: meta.slip, expires: '2026-06-14T00:00:00Z', created: '2026-06-01', execs: 0 }
@@ -287,7 +315,7 @@ export default function App({ onExit }) {
     setView('policies')
   }
 
-  const shownActivity = liveMode ? liveActivity : activity
+  const shownActivity = liveReadsEnabled ? liveActivity : activity
   const state = { risk, suiPrice, suiSpark, crashState, mode, agentOn, activity: shownActivity }
 
   if (!authed) return (
@@ -367,10 +395,10 @@ export default function App({ onExit }) {
           {/* user */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', borderTop: '1px solid var(--border)' }}>
             <div onClick={() => setView('profile')} title="Profile & wallet" style={{ cursor: 'pointer', width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(135deg,#2EE6CE,#5AA6FF)', color: '#06231f',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{account ? owner.slice(2, 4).toUpperCase() : RG.user.avatar}</div>
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{account ? owner.slice(2, 4).toUpperCase() : readOnlyLiveMode ? 'AG' : RG.user.avatar}</div>
             <div className="rg-userblock" onClick={() => setView('profile')} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}>
               <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ownerShort}</div>
-              <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{account ? 'Sui wallet · testnet' : RG.user.provider}</div>
+              <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{account ? 'Sui wallet · testnet' : readOnlyLiveMode ? 'Worker live reads · no signing' : RG.user.provider}</div>
             </div>
             <span style={{ color: 'var(--t2)', cursor: 'pointer' }} onClick={() => { if (account) disconnect(); setAuthed(false); onExit && onExit() }}><Icon name="logout" size={16} /></span>
           </div>
@@ -457,6 +485,20 @@ export default function App({ onExit }) {
 
           {/* scroll body */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '24px 26px 60px' }}>
+            {liveReadsEnabled && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderRadius: 'var(--r-lg)', marginBottom: 18,
+                background: liveReadMeta.source === 'chain_fallback' ? 'var(--warn-dim)' : 'var(--glass)',
+                border: `1px solid ${liveReadMeta.source === 'chain_fallback' ? 'rgba(255,194,75,0.35)' : 'var(--border)'}` }}>
+                <span style={{ color: liveReadMeta.source === 'chain_fallback' ? 'var(--warn)' : 'var(--accent)', flexShrink: 0 }}><Icon name={liveReadMeta.source === 'chain_fallback' ? 'alert' : 'link'} size={16} /></span>
+                <div style={{ flex: 1, fontSize: 12.5, color: 'var(--t1)', lineHeight: 1.45 }}>
+                  <strong style={{ color: 'var(--t0)' }}>{liveReadMeta.source === 'chain_fallback' ? 'Direct-chain read-only fallback' : 'Live Worker reads'}</strong>
+                  {' '}for {ownerShort}. {readOnlyLiveMode ? 'No wallet signing is required; write actions are disabled until a wallet connects.' : 'Reads come from the configured Worker first.'}
+                  {liveReadMeta.error && <span className="mono" style={{ color: 'var(--warn)', marginLeft: 8 }}>worker_error={liveReadMeta.error.slice(0, 90)}</span>}
+                </div>
+                <span className={`badge ${liveReadMeta.source === 'chain_fallback' ? 'badge-warn' : 'badge-accent'}`} style={{ fontSize: 9.5 }}>
+                  <span className="dot"></span>{liveReadMeta.source === 'chain_fallback' ? 'fallback · read-only' : 'worker · testnet'}</span>
+              </div>
+            )}
             {halted && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderRadius: 'var(--r-lg)', marginBottom: 18,
                 background: 'var(--danger-dim)', border: '1px solid rgba(255,84,112,0.45)' }}>
@@ -472,21 +514,22 @@ export default function App({ onExit }) {
                 </button>
               </div>
             )}
-            {view === 'dashboard' && <Dashboard state={state} live={liveMode ? { summary: liveSummary, market: liveMarket, activity: liveActivity } : null} />}
+            {view === 'dashboard' && <Dashboard state={state} live={liveReadsEnabled ? { summary: liveSummary, market: liveMarket, activity: liveActivity } : null} />}
             {view === 'new' && <NewStrategy mode={mode} setMode={setMode} onDone={deployPolicy} />}
-            {view === 'activity' && <ActivityView activity={shownActivity} onTx={setTxView} live={liveMode} loading={liveMode && liveLoading} />}
-            {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} live={liveMode} loading={liveMode && liveLoading} />}
+            {view === 'activity' && <ActivityView activity={shownActivity} onTx={setTxView} live={liveReadsEnabled} loading={liveReadsEnabled && liveLoading} />}
+            {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} />}
             {view === 'profile' && <Profile
-              live={liveMode}
-              loading={liveMode && liveLoading}
+              live={liveReadsEnabled}
+              readOnly={readOnlyLiveMode}
+              loading={liveReadsEnabled && liveLoading}
               policies={policies}
-              holdings={liveMode ? liveHoldings : RG.holdings}
-              account={liveMode ? {
-                avatar: owner.slice(2, 4).toUpperCase(),
+              holdings={liveReadsEnabled ? liveHoldings : RG.holdings}
+              account={liveReadsEnabled ? {
+                avatar: account ? owner.slice(2, 4).toUpperCase() : 'AG',
                 handle: ownerShort,
                 addr: ownerShort,
                 fullAddr: owner,
-                provider: currentWallet?.name || 'Sui wallet',
+                provider: account ? (currentWallet?.name || 'Sui wallet') : 'RescueGrid Worker',
                 network: 'Sui Testnet',
               } : RG.account}
               onNav={setView}
@@ -495,7 +538,7 @@ export default function App({ onExit }) {
           </div>
         </main>
 
-        {inspect && <PolicyInspect p={inspect} activity={shownActivity} onClose={() => setInspect(null)} onRevoke={handleRevoke} onTx={setTxView} />}
+        {inspect && <PolicyInspect p={inspect} activity={shownActivity} onClose={() => setInspect(null)} onRevoke={handleRevoke} onTx={setTxView} readOnly={readOnlyLiveMode} />}
         {txView && <TxDrawer tx={txView} onClose={() => setTxView(null)} />}
 
         {/* toast */}
