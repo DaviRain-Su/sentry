@@ -28,6 +28,7 @@ import { PolicyInspect, TxDrawer } from './components/Detail.jsx'
 import { MarketsView } from './components/Markets.jsx'
 import { RiskCenter } from './components/Risk.jsx'
 import { StrategyMarketplace, StrategyDetail } from './components/Marketplace.jsx'
+import { DataSources } from './components/DataSources.jsx'
 import { AgentRuntimeDrawer } from './components/MarketDrawers.jsx'
 import { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle } from './components/TweaksPanel.jsx'
 import { Button } from '@heroui/react'
@@ -379,6 +380,7 @@ export default function App({ onExit }) {
             <NavItem icon="grid" label="Strategy catalog" active={view === 'strategies' || view === 'strategy-detail'} onClick={() => setView('strategies')} />
             <NavItem icon="shield" label="Policies" active={view === 'policies'} onClick={() => setView('policies')} />
             <NavItem icon="alert" label="Risk center" active={view === 'risk'} onClick={() => setView('risk')} />
+            <NavItem icon="globe" label="Data sources" active={view === 'data'} onClick={() => setView('data')} />
             <NavItem icon="wallet" label="Profile & wallet" active={view === 'profile'} onClick={() => setView('profile')} />
           </div>
           <Button className="mt-[18px] bg-accent text-accent-foreground font-semibold" fullWidth onPress={() => setView('new')}
@@ -561,6 +563,7 @@ export default function App({ onExit }) {
             {view === 'risk' && <RiskCenter policies={policies} stopped={halted} onEmergencyStop={emergencyStop} onToast={showToast} />}
             {view === 'strategies' && <StrategyMarketplace onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} onOpen={(id) => { setStratId(id); setView('strategy-detail') }} />}
             {view === 'strategy-detail' && <StrategyDetail id={stratId} onBack={() => setView('strategies')} onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} />}
+            {view === 'data' && <DataSources onToast={showToast} live={liveFeed} setLive={setLiveFeed} />}
             {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} />}
             {view === 'profile' && <Profile
               live={liveReadsEnabled}
