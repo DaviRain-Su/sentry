@@ -3,6 +3,7 @@
    =========================================================== */
 import { useState } from 'react'
 import { Icon, fmtUsd } from './primitives.jsx'
+import { Button, ProgressBar } from '@heroui/react'
 
 function LoadingCard({ label }) {
   return (
@@ -52,10 +53,9 @@ export function ActivityView({ activity, onTx, live = false, loading = false }) 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {kinds.map(k => (
-            <button key={k.id} onClick={() => setFilter(k.id)} className="btn btn-sm"
-              style={{ background: filter === k.id ? 'var(--accent-dim)' : 'var(--glass-2)',
-                borderColor: filter === k.id ? 'var(--accent)' : 'var(--border)',
-                color: filter === k.id ? 'var(--accent)' : 'var(--t1)' }}>{k.label}</button>
+            <Button key={k.id} onPress={() => setFilter(k.id)} size="sm"
+              variant={filter === k.id ? 'solid' : 'bordered'}
+              className={filter === k.id ? 'bg-accent text-accent-foreground' : ''}>{k.label}</Button>
           ))}
         </div>
         <div className="badge badge-neutral"><Icon name="link" size={12} /> verified on-chain</div>
@@ -149,11 +149,11 @@ function PolicyCard({ p, onRevoke, onInspect, readOnly = false }) {
           <span style={{ color: 'var(--t1)' }}>Budget used</span>
           <span className="mono"><span style={{ color: 'var(--t0)', fontWeight: 600 }}>{p.budgetUsed}</span> <span style={{ color: 'var(--t2)' }}>/ {p.budgetCap} USDC</span></span>
         </div>
-        <div style={{ height: 7, background: 'var(--bg-0)', borderRadius: 100, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', borderRadius: 100,
-            background: pct > 80 ? 'var(--danger)' : 'linear-gradient(90deg, var(--accent), #1fc7b1)',
-            boxShadow: pct > 80 ? 'none' : '0 0 12px var(--accent-glow)' }} />
-        </div>
+        <ProgressBar value={pct} minValue={0} maxValue={100} className="w-full">
+          <ProgressBar.Track className="h-[7px] overflow-hidden rounded-full bg-[color:var(--bg-0)]">
+            <ProgressBar.Fill className={pct > 80 ? 'bg-danger' : 'bg-accent'} />
+          </ProgressBar.Track>
+        </ProgressBar>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 16 }}>
@@ -173,9 +173,9 @@ function PolicyCard({ p, onRevoke, onInspect, readOnly = false }) {
         <span className="mono" style={{ fontSize: 11.5, color: days < 5 ? 'var(--warn)' : 'var(--t2)' }}>
           <Icon name="clock" size={12} style={{ verticalAlign: -2, marginRight: 4 }} />expires in {days}d</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-sm btn-ghost" onClick={() => onInspect(p)}><Icon name="eye" size={13} /> Inspect</button>
-          <button className="btn btn-sm btn-danger" disabled={readOnly || p.status === 'revoked'} onClick={() => onRevoke(p.id)} style={{ opacity: readOnly || p.status === 'revoked' ? 0.55 : 1 }}>
-            <Icon name="x" size={13} stroke={2.4} /> {readOnly ? 'Read-only' : p.status === 'revoked' ? 'Revoked' : 'Revoke'}</button>
+          <Button size="sm" variant="bordered" onPress={() => onInspect(p)}><Icon name="eye" size={13} /> Inspect</Button>
+          <Button size="sm" isDisabled={readOnly || p.status === 'revoked'} onPress={() => onRevoke(p.id)} className="bg-danger text-white">
+            <Icon name="x" size={13} stroke={2.4} /> {readOnly ? 'Read-only' : p.status === 'revoked' ? 'Revoked' : 'Revoke'}</Button>
         </div>
       </div>
     </div>
