@@ -322,13 +322,19 @@ MVP deployment targets:
 Production hardening backlog:
 
 - Dedicated event indexer.
+- Migrate Worker reads behind a `ChainDataProvider` boundary from JSON-RPC/SuiClient reads to Sui GraphQL RPC, with gRPC reserved for low-latency agent monitoring and Archival Store-backed providers for history/replay.
+- Optional Seal + Walrus encrypted policy record layer for private strategy snapshots, backtests, reasoning traces and incident reports; never for wallet or agent private keys.
+- Optional `SignerAdapter` layer for local daemon, hardware signer, remote signer or WaaP-style two-party signing; MoveGate + RescuePolicyWrapper remain the Sui on-chain enforcement layer.
 - Direct owner emergency revoke script.
 - Multi-agent key rotation.
 - Local CLI daemon with same Runtime Core, Policy, Guardian and ExecutorAdapter interfaces.
 - Optional `PiWorkerAgentRuntime` adapter for operator console and local/cloud agent-session parity; see [`docs/07-pi-worker-assessment.md`](07-pi-worker-assessment.md). It must not receive `AGENT_KEY` until a separate security review passes.
 - Adapter SDK for CDPM / Cetus DLMM, Scallop and Kai integrations.
+- Strategy Marketplace, Opportunity Scanner and multi-leg strategy templates for funding, perp spread, lending, borrow health, LP range management, rebalance and alert-only watchtower; see [`docs/09-market-product-and-frontend-roadmap.md`](09-market-product-and-frontend-roadmap.md).
 - Multivenue control plane for Sui, EVM, Solana, Hyperliquid and CEX venue accounts; see [`docs/06-post-mvp-multivenue-roadmap.md`](06-post-mvp-multivenue-roadmap.md).
 - Settlement adapters for LI.FI, deBridge and native venue transfers, used for inventory rebalancing rather than hot-path execution.
 - Mainnet deployment checklist and audit.
 
 Multivenue expansion must preserve the MVP security boundary: adapters propose `ExecutionPlan`s, Guardian approves or blocks, and each venue keeps its own authority model. Sui can enforce policy on-chain through Move objects; EVM, Solana, Hyperliquid and CEX integrations need venue-specific account wrappers, modules, delegates, agent wallets, subaccounts or API keys. RescueGrid should unify strategy, risk and activity, not pretend every venue has identical custody or enforcement semantics.
+
+See [`docs/08-sui-data-agent-stack-assessment.md`](08-sui-data-agent-stack-assessment.md) for the Sui Data Stack, Seal/Walrus, WaaP, Sui Stack CRM and Sui Agent Skills assessment. See [`docs/09-market-product-and-frontend-roadmap.md`](09-market-product-and-frontend-roadmap.md) for market research, product surfaces and frontend design backlog.

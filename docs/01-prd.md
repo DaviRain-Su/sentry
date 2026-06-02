@@ -167,6 +167,10 @@ Hackathon 视角的成功指标：
 - Sui zkLogin docs：https://docs.sui.io/sui-stack/zklogin-integration/
 - Deepbook V3 SDK：https://docs.sui.io/onchain-finance/deepbookv3-sdk/
 - Cloudflare Durable Objects + AI Agent：https://developers.cloudflare.com/workflows/get-started/durable-agents/
+- Sui Data Stack（GraphQL RPC / gRPC / Archival Store）：https://blog.sui.io/graphql-archival-store-sui-data-stack/?utm_source=twitter&utm_medium=organic&utm_campaign=build_beyond
+- Seal（Sui access-controlled decentralized secrets management）：https://seal-docs.wal.app
+- WaaP for Agents（two-party signing / policy / approvals）：https://docs.waap.xyz/for-agents
+- Sui Agent Skills：https://docs.sui.io/skills
 
 竞品参考（差异化对齐）：
 - Sigil（Solana on-chain guardrails）：https://sigil.codes/
@@ -176,5 +180,10 @@ Hackathon 视角的成功指标：
 - LI.FI（cross-chain routing / agent integration）：https://docs.li.fi/ | https://docs.li.fi/agents/overview
 - deBridge（cross-chain execution / hooks）：https://docs.debridge.com/ | https://docs.debridge.com/home/use-cases/hooks
 - Hyperliquid API wallets / perps venue： https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/nonces-and-api-wallets
+- Sui Stack CRM（Seal + Walrus + Sui shared-object ACL reference）：https://github.com/abhinavg6/sui-stack-crm
+
+外部资料评估：
+- Sui data / agent stack assessment：[`docs/08-sui-data-agent-stack-assessment.md`](08-sui-data-agent-stack-assessment.md)
+- Market product / frontend roadmap：[`docs/09-market-product-and-frontend-roadmap.md`](09-market-product-and-frontend-roadmap.md)
 
 以上外部资源在进入实现前必须重新核验最新官方文档；本 PRD 只锁定产品意图和 MVP 范围。

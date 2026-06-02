@@ -113,6 +113,36 @@ Phase I is a product expansion track, not a hackathon dependency. Planning basel
 | I7 | Commit | 4h | ActivityEvent v2 draft spec | 支持 chain tx、CEX order id、Hyperliquid cloid、bridge order id、quote id、partial/recoverable 状态 |
 | I8 | Explore | 4h | Cross-venue inventory model | 明确预置库存、再平衡阈值、桥不进 hot path、套利只从 paper/tiny-size 开始 |
 
+## Phase J - Post-MVP Sui Data, Privacy and Signer Hardening
+
+Phase J is based on [`docs/08-sui-data-agent-stack-assessment.md`](08-sui-data-agent-stack-assessment.md). It is not a hackathon dependency, but it should start before production because Sui JSON-RPC has a published deactivation deadline.
+
+| ID | Type | Estimate | Task | Acceptance |
+| --- | --- | --- | --- | --- |
+| J1 | Explore | 3h | ChainDataProvider design | Worker reads are behind `ChainDataProvider`; current JSON-RPC/SuiClient path remains as `JsonRpcChainDataProvider` |
+| J2 | Commit | 4h | GraphQL policy/activity read spike | Implement read-only GraphQL provider for policy list, wrapper snapshots and activity history; compare output against current Worker endpoints |
+| J3 | Explore | 3h | gRPC monitoring spike | Decide whether agent tick should use gRPC streaming for price/event triggers or keep timer polling for MVP-like policies |
+| J4 | Explore | 3h | Archival Store history/replay design | Define historical activity, performance replay and judge/demo replay queries that need archival-backed data |
+| J5 | Explore | 4h | Seal + Walrus private policy record design | Define encrypted strategy snapshot, backtest, reasoning trace and incident report schema; explicitly exclude wallet/agent private keys |
+| J6 | Explore | 3h | Sui Stack CRM pattern adaptation | Map shared-object ACL + Walrus blob id + version events into `PolicyPrivateRecord` or equivalent object design |
+| J7 | Explore | 4h | WaaP/external signer adapter design | Draft `SignerAdapter` for `worker-secret`, `local-daemon`, `waap`, `hardware`, `remote-signer`; require security review before production submission |
+| J8 | Commit | 1h | Sui Agent Skills setup note | Add recommended Sui skills to engineering setup for data access, PTBs, Move tests, publish and frontend dApp Kit workflows |
+
+## Phase K - Post-MVP Product Breadth and Frontend Design
+
+Phase K is based on [`docs/09-market-product-and-frontend-roadmap.md`](09-market-product-and-frontend-roadmap.md). It turns market research into design and implementation backlog. It is not a hackathon dependency, but it should guide the next product demo because the current UI still reads as one rescue strategy rather than a composable DeFi agent platform.
+
+| ID | Type | Estimate | Task | Acceptance |
+| --- | --- | --- | --- | --- |
+| K1 | Explore | 2h | Competitor/product matrix | Confirm comparable products and extract UI patterns for AI agents, automation, vaults, perps funding, lending and LP managers |
+| K2 | Commit | 4h | Strategy Marketplace shell | Add category tabs, strategy cards, adapter badges, risk badges and availability status; unsupported templates must be clearly marked coming soon |
+| K3 | Commit | 4h | Opportunity Scanner shell | Add funding heatmap, perp spread matrix, lending APY table, LP opportunity table and stablecoin peg monitor using mock or read-only data |
+| K4 | Commit | 4h | Strategy detail templates | Add detail views for Funding Rate Harvest, Lending Optimizer and LP Range Manager with capital flow, yield decomposition, risk decomposition and Guardian rules |
+| K5 | Explore | 3h | Strategy Builder v2 design | Specify multi-leg template selection, venue/adapters, capital constraints, PTB/action preview, Guardian checks and signer/agent mode |
+| K6 | Commit | 4h | Active Strategy Detail v2 | Show live legs, net exposure, PnL/carry attribution, open orders, last tick, next tick, pending approvals and pause/resume/revoke actions |
+| K7 | Commit | 3h | Risk Center | Show global budget, venue caps, liquidation watch list, oracle/source health, signer status, stale-data warnings and emergency-stop controls |
+| K8 | Commit | 3h | Agent Ledger v2 | Add strategy/venue/status filters plus expandable rows for reason, input snapshot, execution plan, Guardian result, tx/order id and budget impact |
+
 ## Hackathon Critical Path
 
 MVP 任务清单约 76h（含 B8 feasibility note 和 E9 adapter registry），Phase H 约 18h 且不进入 hackathon critical path。单人 hackathon 应优先跑最小可演示闭环。Critical path 只保留证明 Sub-track 2 的必要任务：
@@ -125,7 +155,7 @@ MVP 任务清单约 76h（含 B8 feasibility note 和 E9 adapter registry），P
 6. D2-D5：Dashboard 只做登录、preview、status、revoke 的最小 UI。
 7. G1、G2、G4：跑通配置、demo script 和最终验证。
 
-Polish 可延后：D1 的完整视觉打磨、D6 的细粒度空状态、B7 pi-worker 深度验证、B8 LeafSheep/CDPM 深度验证、F4 幂等增强、Phase H、Phase I、Post-MVP browser QA。
+Polish 可延后：D1 的完整视觉打磨、D6 的细粒度空状态、B7 pi-worker 深度验证、B8 LeafSheep/CDPM 深度验证、F4 幂等增强、Phase H、Phase I、Phase J、Phase K、Post-MVP browser QA。
 
 如果 B0 发现 MoveGate 不适合，退回到独立实现 RescuePolicy Object（回退为旧版 Phase C 估计 14h）。
 
@@ -143,6 +173,8 @@ Polish 可延后：D1 的完整视觉打磨、D6 的细粒度空状态、B7 pi-w
 10. Demo Hardening starts only after one Testnet transaction is confirmed.
 11. Post-MVP adapters depend on Runtime Core + adapter registry; they must not be implemented by branching Deepbook-specific runtime code.
 12. Phase I depends on Phase H adapter boundaries and must not change hackathon MVP acceptance.
+13. Phase J depends on Worker-first read semantics; GraphQL/gRPC migration must not move production reads directly into the frontend.
+14. Phase K depends on the adapter registry and Worker-first API shape; frontend breadth must not imply real execution support until an adapter exists.
 
 ## Stop Conditions
 
