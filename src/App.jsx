@@ -259,10 +259,16 @@ export default function App({ onExit }) {
   const liveHoldings = liveDashboard.holdings
   const liveFunding = liveDashboard.funding
   const liveLoading = liveReadsEnabled && liveDashboardQuery.isPending
+  const liveActivityLoading = liveReadsEnabled && !!liveDashboardQuery.loading?.activity
+  const livePoliciesLoading = liveReadsEnabled && !!liveDashboardQuery.loading?.policies
+  const liveProfileLoading = liveReadsEnabled && (
+    !!liveDashboardQuery.loading?.balances || !!liveDashboardQuery.loading?.summary
+  )
   const liveReadMeta = liveDashboardQuery.isError
     ? { source: 'error', error: String(liveDashboardQuery.error?.message || liveDashboardQuery.error) }
     : liveDashboard.meta
   const refreshLivePolicies = () => queryClient.invalidateQueries({ queryKey: liveDashboardOwnerKey(owner) })
+  const displayedPolicies = liveReadsEnabled && livePoliciesLoading ? [] : policies
 
   // apply accent + theme to CSS vars
   useEffect(() => {
@@ -366,9 +372,9 @@ export default function App({ onExit }) {
 
   useEffect(() => {
     if (!liveReadsEnabled || !authed) return
-    if (liveDashboardQuery.data) setPolicies(liveDashboardQuery.data.policies)
+    if (!livePoliciesLoading && liveDashboardQuery.data) setPolicies(liveDashboardQuery.data.policies)
     else if (liveDashboardQuery.isError) setPolicies([])
-  }, [liveReadsEnabled, authed, liveDashboardQuery.data, liveDashboardQuery.isError])
+  }, [liveReadsEnabled, authed, liveDashboardQuery.data, liveDashboardQuery.isError, livePoliciesLoading])
 
   const revokeLiveMutation = useMutation({
     mutationFn: async ({ id }) => {
@@ -523,7 +529,7 @@ export default function App({ onExit }) {
     loading: liveLoading,
     readOnly: readOnlyLiveMode,
     meta: liveReadMeta,
-    count: shownActivity.length,
+    count: liveActivityLoading ? '…' : shownActivity.length,
   })
   const state = { risk, suiPrice, suiSpark, crashState, mode, agentOn, activity: shownActivity }
 
@@ -768,22 +774,22 @@ export default function App({ onExit }) {
             )}
             {view === 'dashboard' && <Dashboard state={state} live={liveReadsEnabled ? { summary: liveSummary, market: liveMarket, activity: liveActivity } : null} />}
             {view === 'new' && <NewStrategy mode={mode} setMode={setMode} onDone={deployPolicy} seed={seed} />}
-            {view === 'activity' && <ActivityView activity={shownActivity} onTx={setTxView} live={liveReadsEnabled} loading={liveReadsEnabled && liveLoading} source={sourceMeta} />}
+            {view === 'activity' && <ActivityView activity={shownActivity} onTx={setTxView} live={liveReadsEnabled} loading={liveActivityLoading} source={sourceMeta} />}
             {view === 'markets' && <MarketsView onDeploy={(s) => { setSeed(s); setView('new') }} live={liveFeed} onToast={showToast} />}
-            {view === 'risk' && <RiskCenter policies={policies} stopped={halted} onEmergencyStop={emergencyStop} onToast={showToast} />}
+            {view === 'risk' && <RiskCenter policies={displayedPolicies} stopped={halted} onEmergencyStop={emergencyStop} onToast={showToast} />}
             {view === 'strategies' && <StrategyMarketplace onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} onOpen={openStrategy} />}
             {view === 'strategy-detail' && <StrategyDetail id={stratId} onBack={() => setView('strategies')} onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} />}
             {view === 'data' && <DataSources onToast={showToast} live={liveFeed} setLive={setLiveFeed} />}
-            {view === 'active' && (policies.find(x => x.id === liveId)
-              ? <ActiveStrategy p={policies.find(x => x.id === liveId)} activity={shownActivity} onBack={() => setView('policies')}
+            {view === 'active' && (displayedPolicies.find(x => x.id === liveId)
+              ? <ActiveStrategy p={displayedPolicies.find(x => x.id === liveId)} activity={shownActivity} onBack={() => setView('policies')}
                   onToggle={togglePolicy} onRebalance={rebalanceNow} onRevoke={handleRevoke} onTx={setTxView} onToast={showToast} />
-              : <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} onLive={(p) => openLivePolicy(p.id)} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} source={sourceMeta} />)}
-            {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} onLive={(p) => openLivePolicy(p.id)} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} source={sourceMeta} />}
+              : <PoliciesView policies={displayedPolicies} onRevoke={handleRevoke} onInspect={setInspect} onLive={(p) => openLivePolicy(p.id)} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={livePoliciesLoading} source={sourceMeta} />)}
+            {view === 'policies' && <PoliciesView policies={displayedPolicies} onRevoke={handleRevoke} onInspect={setInspect} onLive={(p) => openLivePolicy(p.id)} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={livePoliciesLoading} source={sourceMeta} />}
             {view === 'profile' && <Profile
               live={liveReadsEnabled}
               readOnly={readOnlyLiveMode}
-              loading={liveReadsEnabled && liveLoading}
-              policies={policies}
+              loading={liveProfileLoading}
+              policies={displayedPolicies}
               holdings={liveReadsEnabled ? liveHoldings : RG.holdings}
               funding={liveReadsEnabled ? liveFunding : null}
               account={liveReadsEnabled ? {
