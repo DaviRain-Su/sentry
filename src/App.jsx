@@ -39,8 +39,17 @@ const CRASH_TAIL = [4.10,3.96,3.84,3.71,3.79]
 
 const TWEAK_DEFAULTS = {
   accent: '#2EE6CE',
+  theme: 'dark',
   crashSeverity: 'severe',
   liveJitter: true,
+}
+
+// blend a hex toward another hex by t (0..1) — deepens accent for light mode
+function mixHex(hex, toward, t) {
+  const p = h => { const x = h.replace('#', ''); const n = parseInt(x.length === 3 ? x.split('').map(c => c + c).join('') : x, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255] }
+  const a = p(hex), b = p(toward)
+  const m = a.map((v, i) => Math.round(v + (b[i] - v) * t))
+  return `rgb(${m[0]}, ${m[1]}, ${m[2]})`
 }
 
 function NavItem({ icon, label, active, onClick, badge }) {
@@ -102,13 +111,17 @@ export default function App({ onExit }) {
       ? `agent ${owner.slice(0, 6)}…${owner.slice(-4)}`
       : RG.user.handle
 
-  // apply accent tweak to CSS vars
+  // apply accent + theme to CSS vars
   useEffect(() => {
     const root = document.documentElement
-    root.style.setProperty('--accent', t.accent)
-    root.style.setProperty('--accent-dim', hexToRgba(t.accent, 0.14))
-    root.style.setProperty('--accent-glow', hexToRgba(t.accent, 0.45))
-  }, [t.accent])
+    const light = t.theme === 'light'
+    root.dataset.theme = light ? 'light' : 'dark'
+    // deepen the neon accent in light mode so accent-colored text reads on white
+    const acc = light ? mixHex(t.accent, '#05201c', 0.5) : t.accent
+    root.style.setProperty('--accent', acc)
+    root.style.setProperty('--accent-dim', hexToRgba(t.accent, light ? 0.16 : 0.14))
+    root.style.setProperty('--accent-glow', hexToRgba(t.accent, light ? 0.32 : 0.45))
+  }, [t.accent, t.theme])
 
   // gentle live jitter when idle
   useEffect(() => {
@@ -483,6 +496,12 @@ export default function App({ onExit }) {
                 )
               })}
             </div>
+
+            {/* theme toggle */}
+            <Button isIconOnly variant="light" className="rg-btn-ghost" aria-label="Toggle theme"
+              onPress={() => setTweak('theme', t.theme === 'light' ? 'dark' : 'light')}>
+              <Icon name={t.theme === 'light' ? 'moon' : 'sun'} size={17} />
+            </Button>
 
             {/* notifications */}
             <div style={{ position: 'relative' }}>

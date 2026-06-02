@@ -271,3 +271,60 @@ textarea:focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px v
 .mkt-row:hover .mkt-deploy { opacity: 1; }
 .mkt-deploy:hover { filter: brightness(1.1); }
 .mode-badge:hover { border-color: var(--accent) !important; color: var(--accent) !important; }
+
+/* ===== light theme (ported from design styles.css) ===== */
+:root[data-theme="light"] {
+  --bg-0: #E7ECF3;
+  --bg-1: #F4F7FB;
+  --bg-2: #FFFFFF;
+  --bg-3: #FFFFFF;
+  --glass: rgba(20, 40, 65, 0.022);
+  --glass-2: rgba(20, 40, 65, 0.045);
+  --glass-hi: rgba(20, 40, 65, 0.075);
+  --border: rgba(20, 40, 65, 0.11);
+  --border-hi: rgba(20, 40, 65, 0.17);
+  --t0: #0E1B29;
+  --t1: #46586A;
+  --t2: #76879A;
+  --t3: #A7B3C0;
+  --sui: #2F7DE0;
+  --sui-dim: rgba(47, 125, 224, 0.13);
+  --safe: #12A06E;
+  --safe-dim: rgba(18, 160, 110, 0.14);
+  --warn: #B7820E;
+  --warn-dim: rgba(183, 130, 14, 0.16);
+  --danger: #E0354F;
+  --danger-dim: rgba(224, 53, 79, 0.12);
+  --danger-glow: rgba(224, 53, 79, 0.4);
+  --chrome: rgba(255, 255, 255, 0.72);
+}
+:root[data-theme="light"] .card {
+  background: #FFFFFF;
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(15, 30, 50, 0.04), 0 10px 26px -18px rgba(15, 30, 50, 0.22);
+}
+:root[data-theme="light"] .glass {
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 10px 26px -18px rgba(15, 30, 50, 0.22);
+}
+:root[data-theme="light"] .app-bg {
+  background:
+    radial-gradient(900px 600px at 78% -8%, rgba(46, 230, 206, 0.12), transparent 60%),
+    radial-gradient(800px 700px at 12% 108%, rgba(90, 166, 255, 0.12), transparent 55%),
+    var(--bg-1);
+}
+:root[data-theme="light"] .app-bg::after {
+  background-image:
+    linear-gradient(rgba(20, 40, 65, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 40, 65, 0.04) 1px, transparent 1px);
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(20, 40, 65, 0.18); background-clip: padding-box;
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 40, 65, 0.3); background-clip: padding-box;
+}
+:root[data-theme="light"] .badge-accent {
+  background: color-mix(in srgb, var(--accent) 16%, #fff);
+  color: color-mix(in srgb, var(--accent) 70%, #06231f);
+}
