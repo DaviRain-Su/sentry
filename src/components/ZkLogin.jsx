@@ -70,14 +70,11 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
           {/* Sui wallet — the real, credential-free sign-in */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {standardWallets.length > 0 ? standardWallets.map(w => (
-              <button key={w.name} onClick={() => connectWallet(w)} disabled={!!loading}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', borderRadius: 'var(--r-md)',
-                  border: 'none', background: 'linear-gradient(180deg, var(--accent), #1fc7b1)', color: '#032420', cursor: loading ? 'wait' : 'pointer',
-                  fontFamily: 'var(--f-body)', fontSize: 14, fontWeight: 700, transition: 'all .14s', boxShadow: '0 8px 24px -8px var(--accent-glow)',
-                  opacity: loading && loading !== w.name ? 0.4 : 1 }}>
+              <Button key={w.name} onPress={() => connectWallet(w)} isDisabled={!!loading} fullWidth
+                className="gap-3 bg-accent text-accent-foreground font-semibold">
                 {w.icon && <img src={w.icon} alt="" width={22} height={22} style={{ borderRadius: 6 }} />}
                 {loading === w.name ? <><Icon name="refresh" size={15} style={{ animation: 'spin 1s linear infinite' }} /> Connecting…</> : `Connect ${w.name}`}
-              </button>
+              </Button>
             )) : (
               <div style={{ display: 'flex', gap: 10, padding: '13px 16px', borderRadius: 'var(--r-md)', border: '1px dashed var(--border-hi)', color: 'var(--t2)', fontSize: 13, lineHeight: 1.45 }}>
                 <span style={{ flexShrink: 0 }}><Icon name="wallet" size={18} /></span>
