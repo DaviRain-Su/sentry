@@ -199,11 +199,29 @@ app.post('/api/policies/:wrapper_id/activate', async (c) => {
   if (!/^0x[0-9a-fA-F]+$/.test(wrapperId)) {
     return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid wrapper id.' }, 400)
   }
+  // Optional strategy lets the runtime evaluate the real price-drop trigger
+  // (threshold_pct + asset). It is not on-chain — only its hash is — so the
+  // owner hands it to the runtime here.
+  let body: { strategy?: Strategy } = {}
+  try { body = await c.req.json() } catch { /* activate may carry no body */ }
   const stub = c.env.AGENT_RUNTIME.get(c.env.AGENT_RUNTIME.idFromName(wrapperId))
   const res = await stub.fetch('https://do/activate', {
     method: 'POST',
-    body: JSON.stringify({ wrapperId }),
+    body: JSON.stringify({ wrapperId, strategy: body.strategy ?? null }),
   })
+  return c.json(await res.json(), res.status as 200)
+})
+
+// ── agent runtime state (observability): the Durable Object's live view —
+//    runtime_state, last action/tick, and the price-drop monitor (last price,
+//    running peak, drawdown, trigger). Does not touch chain. ────────────────
+app.get('/api/policies/:wrapper_id/runtime', async (c) => {
+  const wrapperId = c.req.param('wrapper_id')
+  if (!/^0x[0-9a-fA-F]+$/.test(wrapperId)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid wrapper id.' }, 400)
+  }
+  const stub = c.env.AGENT_RUNTIME.get(c.env.AGENT_RUNTIME.idFromName(wrapperId))
+  const res = await stub.fetch('https://do/state')
   return c.json(await res.json(), res.status as 200)
 })
 
@@ -246,10 +264,16 @@ export class AgentRuntime {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url)
     if (url.pathname === '/activate' && req.method === 'POST') {
-      const { wrapperId } = await req.json<{ wrapperId: string }>()
+      const { wrapperId, strategy } = await req.json<{ wrapperId: string; strategy?: any }>()
       await this.state.storage.put('wrapperId', wrapperId)
       await this.state.storage.put('runtime_state', 'Monitoring')
       await this.state.storage.put('errorCount', 0)
+      if (strategy?.trigger) {
+        await this.state.storage.put('monitor', {
+          threshold_pct: Number(strategy.trigger.threshold_pct) || 0,
+          asset: strategy.trigger.asset || 'SUI',
+        })
+      }
       await this.state.storage.setAlarm(Date.now() + DEFAULT_TICK_INTERVAL_SECONDS * 1000)
       return this.json({ status: 'ok', wrapper_id: wrapperId, runtime_state: 'Monitoring' })
     }
@@ -261,6 +285,11 @@ export class AgentRuntime {
         last_tick_ms: (await this.state.storage.get('lastTickMs')) ?? null,
         last_action: (await this.state.storage.get('lastAction')) ?? null,
         error_count: (await this.state.storage.get('errorCount')) ?? 0,
+        monitor: (await this.state.storage.get('monitor')) ?? null,
+        last_price: (await this.state.storage.get('lastPrice')) ?? null,
+        peak_price: (await this.state.storage.get('peakPrice')) ?? null,
+        drawdown_pct: (await this.state.storage.get('drawdownPct')) ?? null,
+        trigger_met: (await this.state.storage.get('triggerMet')) ?? false,
       })
     }
     if (url.pathname === '/tick' && req.method === 'POST') {
@@ -278,10 +307,43 @@ export class AgentRuntime {
     }
   }
 
+  async monitorPrice(asset: string): Promise<number> {
+    const pool = asset === 'SUI' ? 'SUI_USDC' : null
+    if (!pool) return 0
+    const r = await fetch('https://deepbook-indexer.mainnet.mystenlabs.com/ticker')
+    if (!r.ok) return 0
+    const j = (await r.json()) as Record<string, { last_price?: number }>
+    return Number(j[pool]?.last_price) || 0
+  }
+
   async tickOnce(): Promise<Record<string, unknown>> {
     const wrapperId = (await this.state.storage.get<string>('wrapperId')) ?? null
     if (!wrapperId) return { status: 'error', action: 'error', detail: 'No wrapper registered.' }
-    const result = await runTick(this.env, { wrapperId })
+
+    // Real price-drop trigger: monitor the live mainnet SUI/USDC market signal,
+    // track the running peak, fire when drawdown >= the policy threshold. The
+    // threshold came from the strategy handed in at activate (not on-chain).
+    let market: { triggerMet: boolean; price: string } | undefined
+    const monitor = (await this.state.storage.get<{ threshold_pct: number; asset: string }>('monitor')) ?? null
+    if (monitor && monitor.threshold_pct > 0) {
+      try {
+        const price = await this.monitorPrice(monitor.asset)
+        if (price > 0) {
+          let peak = (await this.state.storage.get<number>('peakPrice')) ?? price
+          if (price > peak) peak = price
+          const drawdownPct = ((peak - price) / peak) * 100
+          const triggerMet = drawdownPct >= monitor.threshold_pct
+          await this.state.storage.put('lastPrice', price)
+          await this.state.storage.put('drawdownPct', Number(drawdownPct.toFixed(3)))
+          await this.state.storage.put('triggerMet', triggerMet)
+          // re-arm the peak after a trigger so it doesn't fire every tick in a slump
+          await this.state.storage.put('peakPrice', triggerMet ? price : peak)
+          market = { triggerMet, price: String(price) }
+        }
+      } catch { /* price read is best-effort; fall through to monitoring */ }
+    }
+
+    const result = await runTick(this.env, { wrapperId, market })
     const rsMap: Record<string, string> = {
       stopped_revoked: 'Revoked',
       stopped_expired: 'Expired',
