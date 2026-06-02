@@ -5,11 +5,12 @@ import { useState, useEffect } from 'react'
 import { RG } from '../data.js'
 import { getSuiPriceHistory } from '../api.js'
 import { Icon, Sparkline, RiskGauge, Token, PairGlyph, useAnimatedNumber, fmtUsd } from './primitives.jsx'
+import { Card } from '@heroui/react'
 import { Liveline } from 'liveline'
 
 function StatCard({ label, value, sub, accent, icon, spark, sparkColor }) {
   return (
-    <div className="card" style={{ padding: '16px 18px', overflow: 'hidden' }}>
+    <Card className="overflow-hidden border border-[color:var(--border)] bg-[color:var(--glass)] px-[18px] py-4">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div className="eyebrow">{label}</div>
         <div style={{ color: accent || 'var(--t2)', opacity: .9 }}><Icon name={icon} size={16} /></div>
@@ -19,7 +20,7 @@ function StatCard({ label, value, sub, accent, icon, spark, sparkColor }) {
         <div style={{ fontSize: 12, color: sub.color || 'var(--t1)', fontFamily: 'var(--f-mono)', fontWeight: 500 }}>{sub.text}</div>
         {spark && <Sparkline data={spark} w={64} h={22} color={sparkColor || 'var(--accent)'} fill={false} strokeW={1.5} />}
       </div>
-    </div>
+    </Card>
   )
 }
 
