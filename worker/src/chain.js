@@ -44,6 +44,13 @@ export async function readMandate(client, mandateId) {
   }
 }
 
+export async function readClockTimestampMs(client) {
+  const obj = await client.getObject({ id: '0x6', options: { showContent: true } })
+  const f = fields(obj)
+  if (!f?.timestamp_ms) return null
+  return Number(f.timestamp_ms)
+}
+
 export async function queryPolicyEvents(client, wrapperId, max = 100) {
   const out = []
   let cursor = null

@@ -8,7 +8,7 @@ import { strategyHash } from './strategy-core.js'
 import { buildCreatePolicyTx, buildRevokeTx } from './sui-tx.js'
 import { getActivity, listPoliciesByOwner, listActivityByOwner, getOwnerSummary, getMarket, getBalances, readWrapper, readBalanceManagerBalance } from './chain.js'
 import { getClient, DEPLOYMENT } from './sui-tx.js'
-import { runTick } from './tick.js'
+import { runTick, validateExecutionPlan } from './tick.js'
 import { validateForceTrigger, validateTickAuthorization } from './tick-auth.js'
 import { buildFundingReadiness, parseIntentWithStability } from './read-surfaces.js'
 import { AGENT_ADDRESS } from './config.js'
@@ -269,6 +269,60 @@ app.get('/api/policies/:wrapper_id/runtime', async (c) => {
   const stub = c.env.AGENT_RUNTIME.get(c.env.AGENT_RUNTIME.idFromName(wrapperId))
   const res = await stub.fetch('https://do/state')
   return c.json(await res.json(), res.status as 200)
+})
+
+// ── E7 safety preflight: non-mutating, chain-backed execution-plan validation ─
+app.post('/api/execution/validate-plan', async (c) => {
+  let body: {
+    wrapper_id?: string
+    mandate_id?: string
+    proposed?: {
+      pool_id?: string
+      amount?: string | number
+      estimated_slippage_bps?: number
+      agent_id?: string
+    }
+  }
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid JSON body.' }, 400)
+  }
+  if (!body.wrapper_id || !/^0x[0-9a-fA-F]+$/.test(body.wrapper_id)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Valid wrapper_id required.' }, 400)
+  }
+  if (body.mandate_id && !/^0x[0-9a-fA-F]+$/.test(body.mandate_id)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid mandate_id.' }, 400)
+  }
+  const proposed = body.proposed ?? {}
+  if (!proposed.pool_id || !/^0x[0-9a-fA-F]+$/.test(proposed.pool_id)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Valid proposed.pool_id required.' }, 400)
+  }
+  const amount = String(proposed.amount ?? '')
+  if (!/^\d+$/.test(amount)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Valid proposed.amount required.' }, 400)
+  }
+  const slippage = Number(proposed.estimated_slippage_bps)
+  if (!Number.isSafeInteger(slippage) || slippage < 0) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Valid proposed.estimated_slippage_bps required.' }, 400)
+  }
+  if (proposed.agent_id && !/^0x[0-9a-fA-F]+$/.test(proposed.agent_id)) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid proposed.agent_id.' }, 400)
+  }
+
+  const result = await validateExecutionPlan(getClient(), {
+    wrapperId: body.wrapper_id,
+    mandateId: body.mandate_id,
+    proposed: {
+      pool_id: proposed.pool_id,
+      amount,
+      estimated_slippage_bps: slippage,
+      agent_id: proposed.agent_id,
+    },
+    expectedAgentId: DEPLOYMENT.agent.address,
+    expectedPoolId: DEPLOYMENT.deepbook.pools.SUI_DBUSDC.pool_id,
+  })
+  return c.json({ status: 'ok', ...result })
 })
 
 // ── E7: internal agent tick (token-gated; force_trigger only in demo mode) ─

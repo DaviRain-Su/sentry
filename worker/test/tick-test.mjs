@@ -36,6 +36,19 @@ check('wrong pool -> blocked', run({ expectedPoolId: POOL, wrapper: { ...base.wr
 check('wrong pool exposes stable code', run({ expectedPoolId: POOL, wrapper: { ...base.wrapper, pool_id: '0xBAD' } }).code, 'WRONG_POOL')
 check('guardian block -> blocked', run({ proposed: { pool_id: POOL, amount: '100000', estimated_slippage_bps: 150 } }).action, 'blocked')
 check('guardian block exposes stable code', run({ proposed: { pool_id: POOL, amount: '100000', estimated_slippage_bps: 150 } }).code, 'OVER_SLIPPAGE')
+const safetyCases = [
+  ['over-budget plan', { proposed: { pool_id: POOL, amount: '1000001', estimated_slippage_bps: 50 } }, 'OVER_BUDGET'],
+  ['over-slippage plan', { proposed: { pool_id: POOL, amount: '100000', estimated_slippage_bps: 101 } }, 'OVER_SLIPPAGE'],
+  ['proposed wrong pool plan', { proposed: { pool_id: '0xBAD', amount: '100000', estimated_slippage_bps: 50 } }, 'WRONG_POOL'],
+  ['proposed wrong agent plan', { proposed: { pool_id: POOL, amount: '100000', estimated_slippage_bps: 50, agent_id: '0xOTHER' } }, 'WRONG_AGENT'],
+  ['mandate-wrapper mismatch plan', { wrapper: { ...base.wrapper, mandate_id: '0xOTHER' } }, 'MANDATE_MISMATCH'],
+]
+for (const [name, override, code] of safetyCases) {
+  const decision = run(override)
+  check(`${name} -> blocked before submission`, decision.action, 'blocked')
+  check(`${name} exposes ${code}`, decision.code, code)
+  check(`${name} never claims execution`, decision.execution_claimed, false)
+}
 check('trigger+pass+enabled -> execute', run({}).action, 'execute')
 const disabled = run({ executionEnabled: false })
 check('trigger+pass+disabled -> blocked (gated)', disabled.action, 'blocked')

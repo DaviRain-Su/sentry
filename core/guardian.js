@@ -29,7 +29,7 @@ export const GUARDIAN_BLOCKER_CODE = {
  * @param {object} a
  * @param {{id:string, revoked:boolean, expires_at_ms:number|string, agent?:string}} a.mandate
  * @param {{mandate_id:string, pool_id:string, budget_ceiling:string, spent_amount:string, max_slippage_bps:number, agent?:string}} a.wrapper
- * @param {{pool_id:string, amount:string, estimated_slippage_bps:number}} a.proposed
+ * @param {{pool_id:string, amount:string, estimated_slippage_bps:number, agent_id?:string}} a.proposed
  * @param {number} a.nowMs
  * @returns {{decision:'allow'|'block', reason?:number, code?:string, label:string, detail:string, remaining:string, concentration_pct?:number, warnings?:object[]}}
  */
@@ -47,6 +47,10 @@ export function runGuardian({ mandate, wrapper, proposed, nowMs }) {
     return block(GUARDIAN_REASON.MANDATE_MISMATCH, 'Mandate/wrapper mismatch', 'wrapper.mandate_id != mandate.id')
   if (wrapper.agent && mandate.agent && wrapper.agent !== mandate.agent)
     return block(GUARDIAN_REASON.AGENT_MISMATCH, 'Agent mismatch', 'wrapper.agent != mandate.agent')
+  if (proposed.agent_id && wrapper.agent && proposed.agent_id !== wrapper.agent)
+    return block(GUARDIAN_REASON.AGENT_MISMATCH, 'Agent mismatch', 'proposed agent is outside policy scope')
+  if (proposed.agent_id && mandate.agent && proposed.agent_id !== mandate.agent)
+    return block(GUARDIAN_REASON.AGENT_MISMATCH, 'Agent mismatch', 'proposed agent is outside mandate scope')
   if (mandate.revoked)
     return block(GUARDIAN_REASON.REVOKED, 'Mandate revoked', 'Policy authority has been revoked on-chain.')
   if (nowMs >= expires)

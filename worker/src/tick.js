@@ -2,7 +2,7 @@
 // runTick() adds chain I/O + (gated) execution. Allowed actions (docs §7):
 // no_op | blocked | executed | stopped_revoked | stopped_expired | error.
 import { runGuardian } from './guardian.js'
-import { readWrapper, readMandate, readBalanceManagerBalance } from './chain.js'
+import { readWrapper, readMandate, readBalanceManagerBalance, readClockTimestampMs } from './chain.js'
 import { buildExecutionTx } from './deepbook.js'
 import { DEPLOYMENT } from './sui-tx.js'
 import { keypairFromWorkerEnv } from './secret-safe-signer.js'
@@ -51,7 +51,7 @@ function readinessBlock({ action = 'blocked', code, detail, extra = {} }) {
  * @param {{mandate_id:string,pool_id:string,budget_ceiling:string,spent_amount:string,max_slippage_bps:number,agent?:string}} a.wrapper
  * @param {{id:string,revoked:boolean,expires_at_ms:number|string,agent?:string}} a.mandate
  * @param {boolean} a.triggerMet
- * @param {{pool_id:string,amount:string,estimated_slippage_bps:number}} a.proposed
+ * @param {{pool_id:string,amount:string,estimated_slippage_bps:number,agent_id?:string}} a.proposed
  * @param {number} a.nowMs
  * @param {boolean} a.executionEnabled
  * @param {string=} a.expectedAgentId
@@ -85,6 +85,69 @@ export function decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, exec
     })
   }
   return { action: 'execute', detail: 'Trigger met + Guardian passed; executing rescue order.', guardian }
+}
+
+export async function validateExecutionPlan(client, {
+  wrapperId,
+  mandateId,
+  proposed,
+  nowMs = undefined,
+  expectedAgentId,
+  expectedPoolId,
+}) {
+  const wrapper = await readWrapper(client, wrapperId)
+  if (!wrapper) return { action: 'error', code: 'WRAPPER_NOT_FOUND', detail: 'Wrapper not found on-chain.', execution_claimed: false }
+  const clockMs = nowMs ?? await readClockTimestampMs(client)
+  if (!Number.isFinite(clockMs)) return { action: 'error', code: 'CLOCK_UNAVAILABLE', detail: 'Sui Clock timestamp was not readable.', execution_claimed: false }
+
+  if (mandateId && mandateId !== wrapper.mandate_id) {
+    const mandate = { id: mandateId, revoked: false, expires_at_ms: String(clockMs + 1), agent: wrapper.agent }
+    const decision = decideTick({
+      wrapper,
+      mandate,
+      triggerMet: true,
+      proposed,
+      nowMs: clockMs,
+      executionEnabled: true,
+      expectedAgentId,
+      expectedPoolId,
+    })
+    return {
+      ...decision,
+      wrapper_id: wrapperId,
+      mandate_id: mandateId,
+      wrapper_mandate_id: wrapper.mandate_id,
+      construction_path: 'Worker/API non-executing plan validation',
+      chain_time_source: 'sui_clock_object_0x6',
+      submitted: false,
+      execution_claimed: false,
+    }
+  }
+
+  const mandate = await readMandate(client, wrapper.mandate_id)
+  if (!mandate) return { action: 'error', code: 'MANDATE_NOT_FOUND', detail: 'Mandate not found on-chain.', execution_claimed: false }
+  const decision = decideTick({
+    wrapper,
+    mandate,
+    triggerMet: true,
+    proposed,
+    nowMs: clockMs,
+    executionEnabled: true,
+    expectedAgentId,
+    expectedPoolId,
+  })
+  const planDecision = decision.action === 'execute'
+    ? { action: 'validated', readiness_state: 'ready', detail: 'Plan passed Guardian pre-submit validation; no transaction was submitted.', guardian: decision.guardian }
+    : decision
+  return {
+    ...planDecision,
+    wrapper_id: wrapperId,
+    mandate_id: wrapper.mandate_id,
+    construction_path: 'Worker/API non-executing plan validation',
+    chain_time_source: 'sui_clock_object_0x6',
+    submitted: false,
+    execution_claimed: false,
+  }
 }
 
 /** Per-trade amount: one rung = budget/5, capped at remaining budget. */
@@ -145,7 +208,7 @@ async function checkFunding(client, proposed, executionEnabled) {
  */
 export async function runTick(env, p) {
   const client = (await import('./sui-tx.js')).getClient()
-  const nowMs = p.nowMs ?? Date.now()
+  const nowMs = p.nowMs ?? await readClockTimestampMs(client) ?? Date.now()
   const wrapper = await readWrapper(client, p.wrapperId)
   if (!wrapper) return { action: 'error', code: 'WRAPPER_NOT_FOUND', detail: 'Wrapper not found on-chain.', execution_claimed: false }
   const mandate = await readMandate(client, wrapper.mandate_id)

@@ -24,6 +24,8 @@ check('mandate/wrapper mismatch -> 7', run({ wrapper: { mandate_id: '0xOTHER' } 
 check('mandate/wrapper mismatch code stable', run({ wrapper: { mandate_id: '0xOTHER' } }).code, C[R.MANDATE_MISMATCH])
 check('agent mismatch -> 8', run({ wrapper: { agent: '0xOTHER' } }).reason, R.AGENT_MISMATCH)
 check('agent mismatch code stable', run({ wrapper: { agent: '0xOTHER' } }).code, C[R.AGENT_MISMATCH])
+check('proposed wrong agent -> 8', run({ proposed: { agent_id: '0xOTHER' } }).reason, R.AGENT_MISMATCH)
+check('proposed wrong agent code stable', run({ proposed: { agent_id: '0xOTHER' } }).code, C[R.AGENT_MISMATCH])
 check('revoked -> 4', run({ mandate: { revoked: true } }).reason, R.REVOKED)
 check('revoked code stable', run({ mandate: { revoked: true } }).code, C[R.REVOKED])
 check('expired -> 3', run({ nowMs: 20_000 }).reason, R.EXPIRED)
