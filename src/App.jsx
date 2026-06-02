@@ -569,7 +569,7 @@ export default function App({ onExit }) {
                     </div>
                     <div style={{ maxHeight: 320, overflowY: 'auto' }}>
                       {notifs.map(n => {
-                        const nm = { exec: ['var(--accent)', 'bolt'], guardian: ['var(--danger)', 'shield'], retry: ['var(--warn)', 'refresh'], policy: ['var(--sui)', 'grid'] }[n.kind] || ['var(--t1)', 'eye']
+                        const nm = { exec: ['var(--accent)', 'bolt'], rebalance: ['var(--sui)', 'swap'], bridge: ['var(--accent)', 'globe'], guardian: ['var(--danger)', 'shield'], retry: ['var(--warn)', 'refresh'], policy: ['var(--sui)', 'grid'] }[n.kind] || ['var(--t1)', 'eye']
                         return (
                           <div key={n.id} style={{ display: 'flex', gap: 11, padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
                             <span style={{ width: 26, height: 26, borderRadius: 7, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',

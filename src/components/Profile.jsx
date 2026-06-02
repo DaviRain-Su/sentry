@@ -418,6 +418,50 @@ export function Profile({ account, holdings, policies, funding = null, live = fa
           </div>
 
         </div>
+
+        {/* ---------- connected exchanges (demo persona) ---------- */}
+        {a.exchanges && a.exchanges.length > 0 && (
+          <div className="card" style={{ padding: '16px 18px' }}>
+            <div className="card-hd" style={{ padding: 0, marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: 'var(--warn)' }}><Icon name="swap" size={16} /></span>
+                <div className="card-title">Connected exchanges</div>
+                <span className="badge badge-neutral" style={{ fontSize: 9.5 }}>{a.exchanges.filter(e => e.status === 'connected').length} linked</span>
+              </div>
+              <Button size="sm" variant="light" className="rg-btn-ghost" onPress={() => onToast && onToast('Connect an exchange with a read + trade API key (no withdraw)', 'var(--sui)')}>
+                <Icon name="plus" size={13} /> Connect
+              </Button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+              {a.exchanges.map(ex => {
+                const on = ex.status === 'connected'
+                return (
+                  <div key={ex.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 'var(--r-md)',
+                    background: 'var(--glass)', border: '1px solid var(--border)', opacity: on ? 1 : 0.62 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 9, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: `linear-gradient(135deg, ${ex.c}, ${ex.c}99)`, color: '#06140f', fontWeight: 700, fontFamily: 'var(--f-display)', fontSize: 15 }}>{ex.name[0]}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{ex.name}</span>
+                        <span className={`badge ${on ? 'badge-safe' : 'badge-neutral'}`} style={{ fontSize: 9 }}><span className={`dot ${on ? 'pulse' : ''}`}></span>{on ? 'live' : 'off'}</span>
+                      </div>
+                      {on
+                        ? <div className="mono" style={{ fontSize: 13.5, fontWeight: 600, marginTop: 3 }}>${fmtUsd(ex.balance, 0)}</div>
+                        : <Button size="sm" className="rg-btn-2" style={{ marginTop: 5 }} onPress={() => onToast && onToast('Linking ' + ex.name + ' — paste a read + trade API key', 'var(--accent)')}>Link account</Button>}
+                      <div className="mono" style={{ fontSize: 10, color: 'var(--t2)', marginTop: 4 }}>{on ? ex.perms + ' · no withdraw' : 'link to enable CEX arb'}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 9, marginTop: 12, padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--glass)' }}>
+              <span style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }}><Icon name="shield" size={14} /></span>
+              <div style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--t1)' }}>
+                Exchange keys are <strong style={{ color: 'var(--t0)' }}>read + trade only</strong> — withdrawal is never enabled, so the agent can arbitrage across CEX and on-chain venues but can't move funds off an exchange.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

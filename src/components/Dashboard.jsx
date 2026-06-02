@@ -318,9 +318,9 @@ export function Dashboard({ state, live }) {
                 <div key={a.t + i} className={i === 0 && crashState === 'rescuing' ? 'fade-up' : ''}
                   style={{ display: 'flex', gap: 11, padding: '10px 18px', borderTop: i ? '1px solid var(--border)' : 'none' }}>
                   <div style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: a.kind === 'exec' ? 'var(--accent-dim)' : a.kind === 'guardian' ? 'var(--danger-dim)' : a.kind === 'policy' ? 'var(--sui-dim)' : 'var(--glass-hi)',
-                    color: a.kind === 'exec' ? 'var(--accent)' : a.kind === 'guardian' ? 'var(--danger)' : a.kind === 'policy' ? 'var(--sui)' : 'var(--t1)' }}>
-                    <Icon name={a.kind === 'exec' ? 'bolt' : a.kind === 'guardian' ? 'shield' : a.kind === 'policy' ? 'grid' : 'eye'} size={14} />
+                    background: a.kind === 'exec' ? 'var(--accent-dim)' : a.kind === 'guardian' ? 'var(--danger-dim)' : a.kind === 'rebalance' ? 'var(--sui-dim)' : a.kind === 'bridge' ? 'var(--accent-dim)' : a.kind === 'policy' ? 'var(--sui-dim)' : 'var(--glass-hi)',
+                    color: a.kind === 'exec' ? 'var(--accent)' : a.kind === 'guardian' ? 'var(--danger)' : a.kind === 'rebalance' ? 'var(--sui)' : a.kind === 'bridge' ? 'var(--accent)' : a.kind === 'policy' ? 'var(--sui)' : 'var(--t1)' }}>
+                    <Icon name={a.kind === 'exec' ? 'bolt' : a.kind === 'guardian' ? 'shield' : a.kind === 'rebalance' ? 'swap' : a.kind === 'bridge' ? 'globe' : a.kind === 'policy' ? 'grid' : 'eye'} size={14} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t0)' }}>{a.title}</div>

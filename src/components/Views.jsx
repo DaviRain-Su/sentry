@@ -114,7 +114,11 @@ function PolicyCard({ p, onRevoke, onInspect, onLive, readOnly = false }) {
     'rescue-grid': { icon: 'grid', label: 'Rescue Grid', c: 'var(--accent)' },
     'dca': { icon: 'target', label: 'DCA Ladder', c: 'var(--sui)' },
     'hedge': { icon: 'shield', label: 'Hedge', c: 'var(--warn)' },
-  }[p.strategy]
+    'funding-arb': { icon: 'swap', label: 'Funding Arb', c: 'var(--accent)' },
+    'lp-manage': { icon: 'droplet', label: 'LP Manager', c: 'var(--accent)' },
+    'lending': { icon: 'percent', label: 'Yield Router', c: 'var(--safe)' },
+    'spot-arb': { icon: 'scale', label: 'Spot Arb', c: 'var(--safe)' },
+  }[p.strategy] || { icon: 'grid', label: p.strategy || 'Strategy', c: 'var(--accent)' }
   const days = Math.max(0, Math.ceil((new Date(p.expires) - new Date('2026-06-01')) / 86400000))
   const active = p.status === 'active'
   const statusMeta = {
