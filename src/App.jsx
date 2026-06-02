@@ -455,13 +455,26 @@ export default function App({ onExit }) {
               </div>
               <div style={{ display: 'flex', gap: 6, background: 'var(--bg-0)', borderRadius: 'var(--r-sm)', padding: 4 }}>
                 {[{ id: 'local', icon: 'cpu', l: 'Local' }, { id: 'cloud', icon: 'cloud', l: 'Cloud' }].map(m => (
-                  <button key={m.id} onClick={() => setMode(m.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  <button key={m.id} title={mode === m.id ? 'View agent runtime' : `Switch to ${m.l}`}
+                    onClick={() => { if (mode === m.id) { setRuntimeMode(m.id); setRuntimeOpen(true) } else { setMode(m.id) } }}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                     padding: '7px 0', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'var(--f-body)', fontSize: 12, fontWeight: 600,
                     background: mode === m.id ? 'var(--glass-hi)' : 'transparent', color: mode === m.id ? 'var(--accent)' : 'var(--t2)', transition: 'all .14s' }}>
                     <Icon name={m.icon} size={14} /> {m.l}
                   </button>
                 ))}
               </div>
+              {/* runtime details affordance — opens the detailed Local/Cloud agent runtime drawer */}
+              <button onClick={() => { setRuntimeMode(mode); setRuntimeOpen(true) }}
+                className="rg-navlabel" title="View agent runtime details"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: 8,
+                  padding: '8px 10px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)', background: 'var(--glass)', cursor: 'pointer' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--t1)' }}>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: mode === 'cloud' ? 'var(--safe)' : 'var(--t3)', boxShadow: mode === 'cloud' ? '0 0 6px var(--safe)' : 'none' }} />
+                  {mode === 'cloud' ? 'Cloud · online' : 'Local · offline'} · runtime
+                </span>
+                <Icon name="chevR" size={13} style={{ color: 'var(--t3)' }} />
+              </button>
               {/* gas sponsorship note */}
               <div style={{ display: 'flex', gap: 8, marginTop: 8, padding: '9px 10px', borderRadius: 'var(--r-sm)', background: 'var(--glass)' }}>
                 <span style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }}><Icon name="bolt" size={14} /></span>
