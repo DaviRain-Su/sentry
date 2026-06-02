@@ -18,7 +18,10 @@ export function getClient() {
 }
 
 function hexToBytes(hex) {
+  if (typeof hex !== 'string') throw new TypeError('hexToBytes expects a string')
   const h = hex.replace(/^0x/, '')
+  if (!/^[0-9a-fA-F]*$/.test(h)) throw new Error('Invalid hex string: contains non-hex characters')
+  if (h.length % 2 !== 0) throw new Error('Invalid hex string: odd length')
   const a = new Uint8Array(h.length / 2)
   for (let i = 0; i < a.length; i++) a[i] = parseInt(h.substr(i * 2, 2), 16)
   return a

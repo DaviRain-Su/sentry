@@ -313,7 +313,7 @@ export async function runTick(env, p) {
   const executionEnabled = env?.EXECUTION_ENABLED === 'true' && !!env?.AGENT_KEY
 
   const expectedPoolId = DEPLOYMENT.deepbook.pools[DEPLOYMENT.deepbook.default_pool]?.pool_id
-  const decision = decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, executionEnabled: true, expectedAgentId: DEPLOYMENT.agent.address, expectedPoolId })
+  const decision = decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, executionEnabled, expectedAgentId: DEPLOYMENT.agent.address, expectedPoolId })
   if (decision.action !== 'execute') return { ...decision, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
 
   const fundingBlock = await checkFunding(client, proposed, executionEnabled)

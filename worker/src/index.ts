@@ -3,6 +3,7 @@
 // in next. The Durable Object agent runtime (E5) is exported as a stub binding.
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { bodyLimit } from 'hono/body-limit'
 import { parseIntent } from './parse.js'
 import { strategyHash } from './strategy-core.js'
 import { buildCreatePolicyTx, buildRevokeTx } from './sui-tx.js'
@@ -26,7 +27,15 @@ export interface Env {
 }
 
 const app = new Hono<{ Bindings: Env }>()
+const PARSE_CACHE_MAX_ENTRIES = 200
 const parseCache = new Map<string, Record<string, unknown>>()
+function setParseCache(key: string, value: Record<string, unknown>) {
+  if (parseCache.size >= PARSE_CACHE_MAX_ENTRIES) {
+    const firstKey = parseCache.keys().next().value
+    if (firstKey !== undefined) parseCache.delete(firstKey)
+  }
+  parseCache.set(key, value)
+}
 
 function positiveIntegerQuery(value: string | undefined, fallback: string): string {
   if (!value) return fallback
@@ -34,6 +43,7 @@ function positiveIntegerQuery(value: string | undefined, fallback: string): stri
 }
 
 app.use('/api/*', cors())
+app.use('/api/*', bodyLimit({ maxSize: 50 * 1024 }))
 
 app.get('/', (c) => c.json({ service: 'rescuegrid-worker', agent: AGENT_ADDRESS, status: 'ok' }))
 
@@ -51,7 +61,11 @@ app.post('/api/intents/parse', async (c) => {
   if (!body.owner || !/^0x[0-9a-fA-F]+$/.test(body.owner) || !body.text || typeof body.text !== 'string') {
     return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'owner and text are required.' }, 400)
   }
-  const result = parseIntentWithStability(parseIntent, parseCache, body)
+  const boundedCache = {
+    get: (k: string) => parseCache.get(k),
+    set: (k: string, v: Record<string, unknown>) => setParseCache(k, v),
+  }
+  const result = parseIntentWithStability(parseIntent, boundedCache, body)
   return c.json(result, result.status === 'ok' ? 200 : 422)
 })
 
@@ -399,9 +413,17 @@ export class AgentRuntime {
   }
 
   async alarm(): Promise<void> {
-    const result = await this.tickOnce()
-    // Halt the loop on terminal chain states; otherwise keep monitoring.
-    const terminal = result.action === 'stopped_revoked' || result.action === 'stopped_expired'
+    let terminal = false
+    try {
+      const result = await this.tickOnce()
+      terminal = result.action === 'stopped_revoked' || result.action === 'stopped_expired'
+    } catch (e) {
+      const n = ((await this.state.storage.get<number>('errorCount')) ?? 0) + 1
+      await this.state.storage.put('errorCount', n)
+      await this.state.storage.put('lastAction', 'error')
+      await this.state.storage.put('lastError', String((e as Error).message || e))
+      // Non-terminal error: keep monitoring. Consider exponential backoff after consecutive errors.
+    }
     if (!terminal) {
       await this.state.storage.setAlarm(Date.now() + DEFAULT_TICK_INTERVAL_SECONDS * 1000)
     }
