@@ -5,7 +5,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useCurrentAccount, useCurrentWallet, useSuiClient, useSignAndExecuteTransaction, useDisconnectWallet } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { RG } from './data.js'
-import { WORKER_CONFIGURED, parseIntent, buildPolicyTx, activatePolicy, listPolicies, listActivity, getSummary, getMarket, getBalances, buildRevokeTx } from './api.js'
+import { WORKER_CONFIGURED, parseIntent, buildPolicyTx, activatePolicy, buildRevokeTx } from './api.js'
+// reads go straight to chain (raw JSON-RPC) so a connected wallet sees real
+// data with no Worker required; the Worker is only used for the write path.
+import { listPolicies, getActivity as listActivity, getSummary, getMarket, getBalances } from './chain-read.js'
 import { Icon, Logo, Token, hexToRgba } from './components/primitives.jsx'
 import { ZkLogin } from './components/ZkLogin.jsx'
 import { Dashboard } from './components/Dashboard.jsx'
@@ -66,7 +69,8 @@ export default function App({ onExit }) {
   const suiClient = useSuiClient()
   const { mutateAsync: signAndExec } = useSignAndExecuteTransaction()
   const { mutate: disconnect } = useDisconnectWallet()
-  const liveMode = WORKER_CONFIGURED && !!account
+  // reads are live whenever a wallet is connected (direct chain reads, no Worker)
+  const liveMode = !!account
   const owner = account?.address || RG.user.addr
   const ownerShort = account ? owner.slice(0, 6) + '…' + owner.slice(-4) : RG.user.handle
 
@@ -192,6 +196,7 @@ export default function App({ onExit }) {
 
   const handleRevoke = async (id) => {
     if (liveMode) {
+      if (!WORKER_CONFIGURED) { showToast('Revoke needs the Worker — set VITE_WORKER_URL and run it', 'var(--warn)'); return }
       const pol = policies.find(p => p.id === id)
       const wid = pol?._wrapperId || id
       try {
@@ -263,7 +268,10 @@ export default function App({ onExit }) {
   }
 
   const deployPolicy = (meta = { name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', budget: 500, scope: 'SUI/USDC', slip: 1.2 }, text) => {
-    if (liveMode) { deployLive(text, meta); return }
+    if (liveMode) {
+      if (!WORKER_CONFIGURED) { showToast('On-chain deploy needs the Worker — set VITE_WORKER_URL and run it', 'var(--warn)'); return }
+      deployLive(text, meta); return
+    }
     const np = { id: '0x' + Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6),
       name: meta.name, strategy: meta.strategy, status: 'active', mode, budgetCap: meta.budget, budgetUsed: 0,
       scope: [meta.scope], maxSlippage: meta.slip, expires: '2026-06-14T00:00:00Z', created: '2026-06-01', execs: 0 }
