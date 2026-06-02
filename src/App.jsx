@@ -3,11 +3,12 @@
    =========================================================== */
 import { useState, useEffect, useRef } from 'react'
 import { useCurrentAccount, useCurrentWallet, useSuiClient, useSignAndExecuteTransaction, useDisconnectWallet } from '@mysten/dapp-kit'
-import { Transaction } from '@mysten/sui/transactions'
 import { RG } from './data.js'
-import { WORKER_CONFIGURED, parseIntent, buildPolicyTx, activatePolicy, buildRevokeTx } from './api.js'
-// reads go straight to chain (raw JSON-RPC) so a connected wallet sees real
-// data with no Worker required; the Worker is only used for the write path.
+// Owner writes are fully client-side: shared core parses the intent, the
+// frontend builds the PTB, the wallet signs. Reads go straight to chain.
+// No Worker required for either — the Worker is only the cloud-agent runtime.
+import { parseIntent } from '../core/strategy.js'
+import { buildCreatePolicyTx, buildRevokeTx } from './ptb.js'
 import { listPolicies, getActivity as listActivity, getSummary, getMarket, getBalances } from './chain-read.js'
 import { Icon, Logo, Token, hexToRgba } from './components/primitives.jsx'
 import { ZkLogin } from './components/ZkLogin.jsx'
@@ -196,16 +197,15 @@ export default function App({ onExit }) {
 
   const handleRevoke = async (id) => {
     if (liveMode) {
-      if (!WORKER_CONFIGURED) { showToast('Revoke needs the Worker — set VITE_WORKER_URL and run it', 'var(--warn)'); return }
       const pol = policies.find(p => p.id === id)
-      const wid = pol?._wrapperId || id
+      const wid = pol?._wrapperId, mid = pol?._mandateId
+      if (!wid || !mid) { showToast('Missing wrapper/mandate id for this policy', 'var(--danger)'); return }
       try {
-        const built = await buildRevokeTx(owner, wid)
-        if (built.status !== 'ok') { showToast(`Revoke build failed: ${built.message || built.code}`, 'var(--danger)'); return }
-        await signAndExec({ transaction: Transaction.from(built.tx_json) })
+        const tx = buildRevokeTx({ wrapperId: wid, mandateId: mid, ownerAddress: owner })
+        await signAndExec({ transaction: tx })
         showToast('Policy revoked on-chain — agent authority deleted', 'var(--danger)')
         pushNotif('policy', 'Policy revoked on-chain')
-        refreshLivePolicies()
+        setTimeout(() => refreshLivePolicies(), 1500)
       } catch (e) {
         showToast(`Revoke failed: ${String(e?.message || e).slice(0, 80)}`, 'var(--danger)')
       }
@@ -239,27 +239,18 @@ export default function App({ onExit }) {
     showToast('Agents resumed — policies restored to prior state', 'var(--accent)')
   }
 
-  // Live create-policy: worker parse -> build unsigned tx -> zkLogin sign ->
-  // read PolicyCreated -> activate Durable Object. Falls back to mock on error.
+  // Live create-policy, fully client-side: core parses the intent -> frontend
+  // builds the create_policy PTB -> the wallet signs it. No Worker.
   const deployLive = async (text, meta) => {
     try {
-      const parsed = await parseIntent(owner, text || `When SUI drops more than 8%, deploy a ${meta.budget} USDC rescue grid`)
+      const parsed = parseIntent(text || `When SUI drops more than 8%, deploy a ${meta.budget} USDC rescue grid`, owner)
       if (parsed.status !== 'ok') { showToast(`Parse failed: ${parsed.message || parsed.code}`, 'var(--danger)'); return false }
-      const built = await buildPolicyTx(owner, parsed.strategy, parsed.strategy_hash)
-      if (built.status !== 'ok') { showToast(`Build failed: ${built.message || built.code}`, 'var(--danger)'); return false }
-      const tx = Transaction.from(built.tx_json)
-      const signed = await signAndExec({ transaction: tx })
-      const res = await suiClient.waitForTransaction({ digest: signed.digest, options: { showObjectChanges: true, showEvents: true } })
-      const ev = (res.events || []).find(e => String(e.type).endsWith('::policy::PolicyCreated'))
-      const wrapperId = ev?.parsedJson?.wrapper_id
-      if (wrapperId) await activatePolicy(wrapperId).catch(() => {})
-      const np = { id: (wrapperId ? wrapperId.slice(0, 6) + '…' + wrapperId.slice(-4) : '0x…live'),
-        name: meta.name, strategy: meta.strategy, status: 'active', mode, budgetCap: meta.budget, budgetUsed: 0,
-        scope: [meta.scope], maxSlippage: meta.slip, expires: '2026-06-14T00:00:00Z', created: '2026-06-02', execs: 0 }
-      setPolicies(ps => [np, ...ps])
+      const tx = buildCreatePolicyTx({ strategy: { ...parsed.strategy, strategy_hash: parsed.strategy_hash }, ownerAddress: owner })
+      await signAndExec({ transaction: tx })
       showToast('Policy created on-chain — agent authorized within limits', 'var(--accent)')
       pushNotif('policy', `Policy deployed on-chain · ${meta.name}`)
       setView('policies')
+      setTimeout(() => refreshLivePolicies(), 1500)
       return true
     } catch (e) {
       showToast(`On-chain deploy failed: ${String(e?.message || e).slice(0, 80)}`, 'var(--danger)')
@@ -268,10 +259,7 @@ export default function App({ onExit }) {
   }
 
   const deployPolicy = (meta = { name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', budget: 500, scope: 'SUI/USDC', slip: 1.2 }, text) => {
-    if (liveMode) {
-      if (!WORKER_CONFIGURED) { showToast('On-chain deploy needs the Worker — set VITE_WORKER_URL and run it', 'var(--warn)'); return }
-      deployLive(text, meta); return
-    }
+    if (liveMode) { deployLive(text, meta); return }
     const np = { id: '0x' + Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6),
       name: meta.name, strategy: meta.strategy, status: 'active', mode, budgetCap: meta.budget, budgetUsed: 0,
       scope: [meta.scope], maxSlippage: meta.slip, expires: '2026-06-14T00:00:00Z', created: '2026-06-01', execs: 0 }

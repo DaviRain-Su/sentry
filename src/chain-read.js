@@ -1,7 +1,7 @@
 // Client-side chain reads (raw JSON-RPC, no SDK) so the dashboard shows REAL
 // data the moment a wallet is connected — no Worker required for reads.
 // (The Worker is still used for the write path: parse + build create_policy.)
-import deployment from '../worker/src/deployment.js'
+import deployment from '../core/deployment.js'
 
 const RPC = deployment.rpc || 'https://fullnode.testnet.sui.io:443'
 const INDEXER = 'https://deepbook-indexer.testnet.mystenlabs.com'

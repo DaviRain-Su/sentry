@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useCurrentAccount } from '@mysten/dapp-kit'
 import { RG } from '../data.js'
 import { Icon, Sparkline } from './primitives.jsx'
-import { WORKER_CONFIGURED, parseIntent } from '../api.js'
+import { parseIntent } from '../../core/strategy.js'
 
 function Stepper({ step, steps }) {
   return (
@@ -62,7 +62,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
   const [expiry, setExpiry] = useState(14)
   const [livePreview, setLivePreview] = useState(null)
   const account = useCurrentAccount()
-  const live = WORKER_CONFIGURED && !!account
+  const live = !!account
   const steps = ['Intent', 'Review', 'Policy', 'Deploy']
   const PARSED = { safe: RG.parsed, dca: RG.parsedDCA, hedge: RG.parsedHedge, risky: RG.parsedRisky }
   const P = PARSED[scenario]
@@ -83,7 +83,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
     const m = PARSED[sc].meta
     if (live) {
       // real Worker parse (structured strategy + hash + PTB preview + Guardian)
-      try { setLivePreview(await parseIntent(account.address, text)) } catch { setLivePreview(null) }
+      try { setLivePreview(parseIntent(text, account.address)) } catch { setLivePreview(null) }
     } else {
       await new Promise(r => setTimeout(r, 1400))
     }

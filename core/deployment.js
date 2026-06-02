@@ -1,0 +1,42 @@
+// RescueGrid deployment constants — the canonical shared record (mirrors
+// deployment.testnet.json). Imported by the frontend, the cloud Worker, and a
+// future local agent. Plain ESM so it loads under Vite, esbuild and Node.
+export default {
+  chain: 'sui:testnet',
+  rpc: 'https://fullnode.testnet.sui.io:443',
+  rescuegrid: {
+    package_id: '0x92f6e3218151e4d16fa51fd49df974a84ea744510f5e5a8ff79a01aacf27bb78',
+    upgrade_cap: '0x87b874c867f452b78a88ab08d4324efc1b7f48cc9c838049aca560dba4149d9f',
+    publish_tx: '27k5sjFx19GoL2cT9H9qTamvKdij2YpQVa3o541Th4sR',
+    protocol_address: '0x92f6e3218151e4d16fa51fd49df974a84ea744510f5e5a8ff79a01aacf27bb78',
+    action_deepbook_rescue: 1,
+  },
+  agent: {
+    // dedicated agent key (worker/.dev.vars AGENT_KEY); separate from owner per spec §2
+    address: '0x9eeed099a0ff576571ffdb5c494db31a3ab2f6c2c76511a778ce5d3952c2ee43',
+    passport_id: '0x0e74210070407a51cd7ed3721c7ce859a0340a52e94100a0829d05420dff8e6b',
+    balance_manager_id: '0x2e2e818f16f71f488384bb60e1d0e09c8c9cc8e211f006caba7d577cadeaaec2',
+  },
+  movegate: {
+    package_id_original: '0xec91e604714e263ad43723d43470f236607bd0b13f64731aad36b00a61cf884a',
+    published_at: '0x1e7fbc6ee51094c3df050fade2e37455adfef7de4d9b79c84a168910067c9f46',
+    agent_registry: '0xb2fadc7ccf9c7b578ba3b1adb8ebfd73191563e536b6b2cc18aa14dac6c7ba46',
+    mandate_registry: '0x26a66d91fef324b833d07d134e5ab6e796e0dfd77f670c27da099479d939b0d3',
+    fee_config: '0x5c92c420f4b3801eb4126fcab6cb4b98212b31f591b4b3d0a025b4e4957120f3',
+    protocol_treasury: '0xf0714bd816e595cacfc9e5921d1754cca0205f6b65867eab6183d0b0a98fc82c',
+    creation_fee_mist: '10000000',
+  },
+  deepbook: {
+    package_id: '0xfb28c4cbc6865bd1c897d26aecbe1f8792d1509a20ffec692c800660cbec6982',
+    package_id_latest: '0x22be4cade64bf2d02412c7e8d0e8beea2f78828b948118d46735315409371a3c',
+    dbusdc_coin_type: '0xf7152c05930480cd740d7311b5b8b45c6f488e3a53a11c3f74a6fac36a52e0d7::DBUSDC::DBUSDC',
+    deep_coin_type: '0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP',
+    pools: {
+      SUI_DBUSDC: { pool_id: '0x1c19362ca52b8ffd7a33cee805a67d40f31e6ba303753fd3a4cfdfacea7163a5', base: '0x2::sui::SUI', base_decimals: 9, quote_decimals: 6 },
+      DEEP_DBUSDC: { pool_id: '0xe86b991f8632217505fd859445f9803967ac84a9d4a1219065bf191fcb74b622', base: '0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP', base_decimals: 6, quote_decimals: 6 },
+      WAL_DBUSDC: { pool_id: '0xeb524b6aea0ec4b494878582e0b78924208339d360b62aec4a8ecd4031520dbb', base_decimals: 9, quote_decimals: 6 },
+    },
+    default_pool: 'SUI_DBUSDC',
+  },
+  system: { clock: '0x6' },
+}
