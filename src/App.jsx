@@ -26,6 +26,7 @@ import { ActivityView, PoliciesView } from './components/Views.jsx'
 import { Profile } from './components/Profile.jsx'
 import { PolicyInspect, TxDrawer } from './components/Detail.jsx'
 import { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle } from './components/TweaksPanel.jsx'
+import { Button } from '@heroui/react'
 
 const BASE_SPARK = [4.61,4.58,4.55,4.59,4.52,4.48,4.51,4.44,4.40,4.43,4.38,4.31,4.27,4.30,4.24,4.19,4.182]
 const CRASH_TAIL = [4.10,3.96,3.84,3.71,3.79]
@@ -355,9 +356,10 @@ export default function App({ onExit }) {
             <NavItem icon="shield" label="Policies" active={view === 'policies'} onClick={() => setView('policies')} />
             <NavItem icon="wallet" label="Profile & wallet" active={view === 'profile'} onClick={() => setView('profile')} />
           </div>
-          <button className="btn btn-primary" style={{ marginTop: 18, justifyContent: 'center' }} onClick={() => setView('new')}>
-            <Icon name="plus" size={16} stroke={2.4} /> <span className="rg-navlabel">New strategy</span>
-          </button>
+          <Button className="mt-[18px] bg-accent text-accent-foreground font-semibold" fullWidth onPress={() => setView('new')}
+            startContent={<Icon name="plus" size={16} stroke={2.4} />}>
+            <span className="rg-navlabel">New strategy</span>
+          </Button>
 
           <div style={{ flex: 1 }} />
 
@@ -390,13 +392,15 @@ export default function App({ onExit }) {
 
           {/* emergency circuit breaker */}
           {halted ? (
-            <button className="btn btn-primary" style={{ marginBottom: 12, justifyContent: 'center' }} onClick={resumeAgents}>
-              <Icon name="refresh" size={15} /> <span className="rg-navlabel">Resume agents</span>
-            </button>
+            <Button className="mb-3 bg-accent text-accent-foreground font-semibold" fullWidth onPress={resumeAgents}
+              startContent={<Icon name="refresh" size={15} />}>
+              <span className="rg-navlabel">Resume agents</span>
+            </Button>
           ) : (
-            <button className="btn btn-danger" style={{ marginBottom: 12, justifyContent: 'center' }} onClick={emergencyStop}>
-              <Icon name="alert" size={15} /> <span className="rg-navlabel">Emergency stop</span>
-            </button>
+            <Button className="mb-3 bg-danger text-white font-semibold" fullWidth onPress={emergencyStop}
+              startContent={<Icon name="alert" size={15} />}>
+              <span className="rg-navlabel">Emergency stop</span>
+            </Button>
           )}
 
           {/* user */}
@@ -442,12 +446,12 @@ export default function App({ onExit }) {
 
             {/* notifications */}
             <div style={{ position: 'relative' }}>
-              <button onClick={() => { setNotifOpen(o => !o); if (!notifOpen) setNotifs(n => n.map(x => ({ ...x, read: true }))) }}
-                className="btn btn-sm btn-ghost" style={{ padding: 9, position: 'relative' }}>
+              <Button isIconOnly variant="light" aria-label="Notifications" className="relative"
+                onPress={() => { setNotifOpen(o => !o); if (!notifOpen) setNotifs(n => n.map(x => ({ ...x, read: true }))) }}>
                 <Icon name="alert" size={17} />
                 {unread > 0 && <span style={{ position: 'absolute', top: 3, right: 3, minWidth: 15, height: 15, padding: '0 4px', borderRadius: 100,
                   background: 'var(--danger)', color: '#fff', fontSize: 9.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--f-mono)' }}>{unread}</span>}
-              </button>
+              </Button>
               {notifOpen && (
                 <>
                   <div onClick={() => setNotifOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
@@ -479,14 +483,15 @@ export default function App({ onExit }) {
 
             {/* demo controls */}
             {crashState === 'idle' ? (
-              <button className="btn btn-sm" onClick={simulateCrash} disabled={halted}
-                style={{ borderColor: 'var(--danger)', color: 'var(--danger)', background: 'var(--danger-dim)', opacity: halted ? 0.4 : 1 }}>
-                <Icon name="alert" size={14} /> <span className="rg-navlabel">Simulate flash crash</span>
-              </button>
+              <Button size="sm" variant="bordered" onPress={simulateCrash} isDisabled={halted}
+                className="border-[color:var(--danger)] text-[color:var(--danger)] bg-[color:var(--danger-dim)]"
+                startContent={<Icon name="alert" size={14} />}>
+                <span className="rg-navlabel">Simulate flash crash</span>
+              </Button>
             ) : (
-              <button className="btn btn-sm btn-ghost" onClick={resetDemo}>
-                <Icon name="refresh" size={14} /> <span className="rg-navlabel">Reset demo</span>
-              </button>
+              <Button size="sm" variant="light" onPress={resetDemo} startContent={<Icon name="refresh" size={14} />}>
+                <span className="rg-navlabel">Reset demo</span>
+              </Button>
             )}
           </header>
 
@@ -516,9 +521,11 @@ export default function App({ onExit }) {
                   <div className="display" style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--danger)' }}>Circuit breaker engaged — all agents halted</div>
                   <div style={{ fontSize: 12.5, color: 'var(--t1)', marginTop: 1 }}>Every policy is frozen on-chain. No agent can execute until you resume — your funds and limits are untouched.</div>
                 </div>
-                <button className="btn btn-sm" onClick={resumeAgents} style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)' }}>
-                  <Icon name="refresh" size={13} /> Resume
-                </button>
+                <Button size="sm" variant="bordered" onPress={resumeAgents}
+                  className="border-accent text-accent bg-[color:var(--accent-dim)]"
+                  startContent={<Icon name="refresh" size={13} />}>
+                  Resume
+                </Button>
               </div>
             )}
             {view === 'dashboard' && <Dashboard state={state} live={liveReadsEnabled ? { summary: liveSummary, market: liveMarket, activity: liveActivity } : null} />}
