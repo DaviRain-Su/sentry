@@ -148,14 +148,14 @@ export function NewStrategy({ onDone, mode, setMode }) {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
             {RG.examples.map(ex => (
-              <Button key={ex} size="sm" radius="full" variant="bordered" onPress={() => setText(ex)}
-                className="border-[color:var(--border)] bg-[color:var(--glass-2)] text-[color:var(--t1)] text-xs font-normal"
+              <Button key={ex} size="sm" variant="bordered" onPress={() => setText(ex)}
+                className="border-[color:var(--border-hi)] bg-[color:var(--glass-2)] text-[color:var(--t1)] text-xs font-normal hover:bg-[color:var(--glass-hi)]"
                 startContent={<span style={{ color: 'var(--accent)' }}>＋</span>}>
                 {ex}
               </Button>
             ))}
-            <Button size="sm" radius="full" variant="bordered" onPress={() => setText(RG.riskyExample)}
-              className="border-[rgba(255,84,112,0.35)] bg-[color:var(--danger-dim)] text-[color:var(--danger)] text-xs font-normal"
+            <Button size="sm" variant="bordered" onPress={() => setText(RG.riskyExample)}
+              className="border-[rgba(255,84,112,0.45)] bg-[color:var(--danger-dim)] text-[color:var(--danger)] text-xs font-normal hover:brightness-110"
               startContent={<span>⚠</span>}>
               Try a risky one (Guardian blocks it)
             </Button>

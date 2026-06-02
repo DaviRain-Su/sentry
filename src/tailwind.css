@@ -22,3 +22,38 @@
   --color-focus: #2ee6ce;
   --color-danger: #ff5470;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   HeroUI theming overrides — pull HeroUI's Button/Card into RescueGrid's neon
+   design language. HeroUI's stylesheet is UNLAYERED (it outranks @layer
+   utilities), which is why Tailwind utilities like `px-[18px]` lose to it. So
+   these overrides are also unlayered and defined AFTER the HeroUI import — same
+   specificity, later in source order, therefore they win.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* HeroUI Card renders with class `.card` (same as our neon card → inherits the
+   glass gradient + 16px radius) but ships zero padding, so KPI content hugs the
+   edge. Restore the design-system inset. */
+.rg-kpi > .card { padding: 16px 18px; }
+
+/* Buttons: rein in the 24px pill radius to the design-system 12px (--r-md) and
+   give text buttons real horizontal inset (HeroUI sets padding:0 + fixed height). */
+.button { border-radius: var(--r-md); }
+.button--md:not(.button--icon-only) { padding-inline: 15px; }
+
+/* Bordered (secondary) buttons use the neon hi-contrast border, not HeroUI grey. */
+.button--bordered { border-color: var(--border-hi); }
+.button--bordered:hover { background: var(--glass-2); border-color: var(--border-hi); }
+
+/* Primary actions get the brand glow back (accent + danger), matching .btn-primary. */
+.button--primary.bg-accent {
+  box-shadow: 0 0 0 1px rgba(46, 230, 206, 0.35), 0 8px 24px -8px var(--accent-glow);
+}
+.button--primary.bg-accent:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 0 1px rgba(46, 230, 206, 0.6), 0 10px 30px -8px var(--accent-glow);
+}
+.button--primary.bg-danger {
+  box-shadow: 0 0 0 1px rgba(255, 84, 112, 0.35), 0 8px 24px -8px rgba(255, 84, 112, 0.4);
+}
+.button--primary.bg-danger:hover { filter: brightness(1.06); }
