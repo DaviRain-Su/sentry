@@ -148,14 +148,14 @@ export function NewStrategy({ onDone, mode, setMode }) {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
             {RG.examples.map(ex => (
-              <Button key={ex} size="sm" variant="bordered" onPress={() => setText(ex)}
-                className="border-[color:var(--border-hi)] bg-[color:var(--glass-2)] text-[color:var(--t1)] text-xs font-normal hover:bg-[color:var(--glass-hi)]"
+              <Button key={ex} size="sm" onPress={() => setText(ex)}
+                className="rg-btn-2 text-xs font-normal"
                 startContent={<span style={{ color: 'var(--accent)' }}>＋</span>}>
                 {ex}
               </Button>
             ))}
-            <Button size="sm" variant="bordered" onPress={() => setText(RG.riskyExample)}
-              className="border-[rgba(255,84,112,0.45)] bg-[color:var(--danger-dim)] text-[color:var(--danger)] text-xs font-normal hover:brightness-110"
+            <Button size="sm" onPress={() => setText(RG.riskyExample)}
+              className="rg-btn-danger-2 text-xs font-normal"
               startContent={<span>⚠</span>}>
               Try a risky one (Guardian blocks it)
             </Button>
@@ -309,7 +309,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
           )}
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Button variant="bordered" onPress={() => setStep(0)}><Icon name="chevL" size={15} /> Edit intent</Button>
+            <Button className="rg-btn-2" onPress={() => setStep(0)} startContent={<Icon name="chevL" size={15} />}>Edit intent</Button>
             {blocked
               ? <Button isDisabled className="opacity-50"><Icon name="x" size={15} /> Blocked by Guardian</Button>
               : <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => setStep(2)}>Configure policy <Icon name="chevR" size={15} /></Button>}
@@ -378,7 +378,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 26 }}>
-            <Button variant="bordered" onPress={() => setStep(1)}><Icon name="chevL" size={15} /> Back</Button>
+            <Button className="rg-btn-2" onPress={() => setStep(1)} startContent={<Icon name="chevL" size={15} />}>Back</Button>
             <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => setStep(3)}>Choose run mode <Icon name="chevR" size={15} /></Button>
           </div>
         </div>
@@ -435,7 +435,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Button variant="bordered" onPress={() => setStep(2)}><Icon name="chevL" size={15} /> Back</Button>
+            <Button className="rg-btn-2" onPress={() => setStep(2)} startContent={<Icon name="chevL" size={15} />}>Back</Button>
             <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => onDone(meta, text)}><Icon name="shield" size={15} /> {readOnlyPreview ? 'Preview only · connect wallet' : 'Sign & deploy policy'}</Button>
           </div>
         </div>

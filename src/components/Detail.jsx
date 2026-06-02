@@ -78,7 +78,7 @@ export function PolicyInspect({ p, activity, onClose, onRevoke, onTx, readOnly =
                   <span className={`dot ${statusMeta.pulse ? 'pulse' : ''}`}></span>{statusMeta.label}</span>
               </div>
             </div>
-            <Button isIconOnly variant="light" size="sm" onPress={onClose} aria-label="Close"><Icon name="x" size={16} /></Button>
+            <Button isIconOnly variant="light" size="sm" className="rg-btn-ghost" onPress={onClose} aria-label="Close"><Icon name="x" size={16} /></Button>
           </div>
         </div>
 
@@ -195,7 +195,7 @@ export function PolicyInspect({ p, activity, onClose, onRevoke, onTx, readOnly =
 
         {/* footer revoke */}
         <div style={{ position: 'sticky', bottom: 0, background: 'var(--bg-2)', borderTop: '1px solid var(--border)', padding: '16px 24px', display: 'flex', gap: 10 }}>
-          <Button variant="bordered" style={{ flex: 1 }} onPress={onClose}>Close</Button>
+          <Button className="rg-btn-2 justify-center" style={{ flex: 1 }} onPress={onClose}>Close</Button>
           <Button className="bg-danger text-white" style={{ flex: 1 }} isDisabled={readOnly || p.status === 'revoked'} onPress={() => { onRevoke(p.id); onClose() }} startContent={<Icon name="x" size={15} stroke={2.4} />}>
             {readOnly ? 'Read-only mode' : p.status === 'revoked' ? 'Already revoked' : 'Revoke authority'}
           </Button>
@@ -254,7 +254,7 @@ export function TxDrawer({ tx, onClose }) {
                 Testnet{data?.checkpoint ? ` · checkpoint ${data.checkpoint.toLocaleString()}` : ''}
               </div>
             </div>
-            <Button isIconOnly variant="light" size="sm" onPress={onClose} aria-label="Close"><Icon name="x" size={16} /></Button>
+            <Button isIconOnly variant="light" size="sm" className="rg-btn-ghost" onPress={onClose} aria-label="Close"><Icon name="x" size={16} /></Button>
           </div>
         </div>
 
@@ -327,7 +327,7 @@ export function TxDrawer({ tx, onClose }) {
             </>
           )}
 
-          <Button variant="bordered" className="justify-center" onPress={() => window.open(explorer, '_blank', 'noopener,noreferrer')} startContent={<Icon name="link" size={14} />}>
+          <Button className="rg-btn-2 justify-center" onPress={() => window.open(explorer, '_blank', 'noopener,noreferrer')} startContent={<Icon name="link" size={14} />}>
             View on SuiScan
           </Button>
         </div>

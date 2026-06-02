@@ -446,7 +446,7 @@ export default function App({ onExit }) {
 
             {/* notifications */}
             <div style={{ position: 'relative' }}>
-              <Button isIconOnly variant="light" aria-label="Notifications" className="relative"
+              <Button isIconOnly variant="light" aria-label="Notifications" className="relative rg-btn-ghost"
                 onPress={() => { setNotifOpen(o => !o); if (!notifOpen) setNotifs(n => n.map(x => ({ ...x, read: true }))) }}>
                 <Icon name="alert" size={17} />
                 {unread > 0 && <span style={{ position: 'absolute', top: 3, right: 3, minWidth: 15, height: 15, padding: '0 4px', borderRadius: 100,
@@ -483,13 +483,13 @@ export default function App({ onExit }) {
 
             {/* demo controls */}
             {crashState === 'idle' ? (
-              <Button size="sm" variant="bordered" onPress={simulateCrash} isDisabled={halted}
-                className="border-[color:var(--danger)] text-[color:var(--danger)] bg-[color:var(--danger-dim)]"
+              <Button size="sm" onPress={simulateCrash} isDisabled={halted}
+                className="rg-btn-danger-2"
                 startContent={<Icon name="alert" size={14} />}>
                 <span className="rg-navlabel">Simulate flash crash</span>
               </Button>
             ) : (
-              <Button size="sm" variant="light" onPress={resetDemo} startContent={<Icon name="refresh" size={14} />}>
+              <Button size="sm" className="rg-btn-2" onPress={resetDemo} startContent={<Icon name="refresh" size={14} />}>
                 <span className="rg-navlabel">Reset demo</span>
               </Button>
             )}
@@ -521,8 +521,9 @@ export default function App({ onExit }) {
                   <div className="display" style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--danger)' }}>Circuit breaker engaged — all agents halted</div>
                   <div style={{ fontSize: 12.5, color: 'var(--t1)', marginTop: 1 }}>Every policy is frozen on-chain. No agent can execute until you resume — your funds and limits are untouched.</div>
                 </div>
-                <Button size="sm" variant="bordered" onPress={resumeAgents}
-                  className="border-accent text-accent bg-[color:var(--accent-dim)]"
+                <Button size="sm" onPress={resumeAgents}
+                  className="rg-btn-2"
+                  style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: 'var(--accent-dim)' }}
                   startContent={<Icon name="refresh" size={13} />}>
                   Resume
                 </Button>

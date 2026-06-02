@@ -89,8 +89,8 @@ export function ZkLogin({ onAuth, onBackToLanding }) {
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
           </div>
 
-          <Button onPress={() => onAuth()} variant="bordered" fullWidth>
-            <Icon name="eye" size={15} /> Explore the demo (no wallet)
+          <Button onPress={() => onAuth()} className="rg-btn-2 justify-center" fullWidth startContent={<Icon name="eye" size={15} />}>
+            Explore the demo (no wallet)
           </Button>
 
           <div style={{ marginTop: 14, fontSize: 11, color: standardWallets.length > 0 ? 'var(--safe)' : 'var(--t2)', fontFamily: 'var(--f-mono)' }}>

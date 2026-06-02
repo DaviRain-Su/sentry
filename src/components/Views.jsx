@@ -54,8 +54,7 @@ export function ActivityView({ activity, onTx, live = false, loading = false }) 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {kinds.map(k => (
             <Button key={k.id} onPress={() => setFilter(k.id)} size="sm"
-              variant={filter === k.id ? 'solid' : 'bordered'}
-              className={filter === k.id ? 'bg-accent text-accent-foreground' : ''}>{k.label}</Button>
+              className={filter === k.id ? 'bg-accent text-accent-foreground font-semibold' : 'rg-btn-2'}>{k.label}</Button>
           ))}
         </div>
         <div className="badge badge-neutral"><Icon name="link" size={12} /> verified on-chain</div>
@@ -173,7 +172,7 @@ function PolicyCard({ p, onRevoke, onInspect, readOnly = false }) {
         <span className="mono" style={{ fontSize: 11.5, color: days < 5 ? 'var(--warn)' : 'var(--t2)' }}>
           <Icon name="clock" size={12} style={{ verticalAlign: -2, marginRight: 4 }} />expires in {days}d</span>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button size="sm" variant="bordered" onPress={() => onInspect(p)}><Icon name="eye" size={13} /> Inspect</Button>
+          <Button size="sm" className="rg-btn-2" onPress={() => onInspect(p)} startContent={<Icon name="eye" size={13} />}>Inspect</Button>
           <Button size="sm" isDisabled={readOnly || p.status === 'revoked'} onPress={() => onRevoke(p.id)} className="bg-danger text-white">
             <Icon name="x" size={13} stroke={2.4} /> {readOnly ? 'Read-only' : p.status === 'revoked' ? 'Revoked' : 'Revoke'}</Button>
         </div>

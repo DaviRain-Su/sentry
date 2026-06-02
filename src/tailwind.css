@@ -57,3 +57,30 @@
   box-shadow: 0 0 0 1px rgba(255, 84, 112, 0.35), 0 8px 24px -8px rgba(255, 84, 112, 0.4);
 }
 .button--primary.bg-danger:hover { filter: brightness(1.06); }
+
+/* Small text buttons also need horizontal inset (HeroUI sets padding:0). */
+.button--sm:not(.button--icon-only) { padding-inline: 12px; }
+
+/* HeroUI v3's `bordered`/`light` variants render NO visible border/background in
+   this build, and `.button` (unlayered) zeroes out border/bg — so Tailwind
+   utilities (layered) lose to it. Attach `.rg-btn-2` for the neon secondary look;
+   the doubled `.button.rg-btn-2` specificity (0,2,0) beats HeroUI's single class. */
+.button.rg-btn-2 {
+  border: 1px solid var(--border-hi);
+  background: var(--glass-2);
+  color: var(--t1);
+}
+.button.rg-btn-2:hover { background: var(--glass-hi); color: var(--t0); border-color: var(--border-hi); }
+.button.rg-btn-2[data-disabled], .button.rg-btn-2:disabled { opacity: 0.5; }
+
+/* Danger-tinted secondary (risky chip, simulate-crash). */
+.button.rg-btn-danger-2 {
+  border: 1px solid rgba(255, 84, 112, 0.45);
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+.button.rg-btn-danger-2:hover { filter: brightness(1.08); }
+.button.rg-btn-danger-2[data-disabled], .button.rg-btn-danger-2:disabled { opacity: 0.4; }
+
+/* Ghost icon/text buttons: keep transparent, add a hover wash so they react. */
+.button.rg-btn-ghost:hover { background: var(--glass-2); color: var(--t0); }

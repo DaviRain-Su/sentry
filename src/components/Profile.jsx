@@ -18,8 +18,8 @@ function CopyChip({ text, label, full }) {
     setTimeout(() => setCopied(false), 1400)
   }
   return (
-    <Button onPress={copy} size="sm" radius="sm" variant="bordered"
-      className={`mono gap-[7px] h-auto min-w-0 py-[6px] px-[10px] border-[color:var(--border)] bg-[color:var(--bg-0)] text-xs font-semibold ${copied ? 'text-[color:var(--accent)]' : 'text-[color:var(--t1)]'}`}
+    <Button onPress={copy} size="sm" className="mono rg-btn-2 text-xs font-semibold"
+      style={copied ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : undefined}
       endContent={<Icon name={copied ? 'check' : 'copy'} size={13} stroke={copied ? 2.6 : 1.8} />}>
       {copied ? 'copied' : (label || text)}
     </Button>
@@ -177,7 +177,7 @@ export function Profile({ account, holdings, policies, funding = null, live = fa
             <Button size="sm" className="bg-accent text-accent-foreground font-semibold" onPress={() => onToast && onToast('Deposit address copied — send USDC or SUI on Sui', 'var(--accent)')}>
               <Icon name="arrowDown" size={14} stroke={2.2} /> Deposit
             </Button>
-            <Button size="sm" variant="bordered" onPress={() => onToast && onToast(live ? 'Withdrawals are signed in your wallet' : 'Withdrawals require your zkLogin signature', 'var(--sui)')}>
+            <Button size="sm" className="rg-btn-2" onPress={() => onToast && onToast(live ? 'Withdrawals are signed in your wallet' : 'Withdrawals require your zkLogin signature', 'var(--sui)')}>
               <Icon name="arrowUp" size={14} stroke={2.2} /> Withdraw
             </Button>
           </div>
@@ -359,7 +359,7 @@ export function Profile({ account, holdings, policies, funding = null, live = fa
                 </div>
               ))}
             </div>
-            <Button size="sm" variant="bordered" fullWidth onPress={() => onNav && onNav('policies')}>
+            <Button size="sm" className="rg-btn-2 justify-center" fullWidth onPress={() => onNav && onNav('policies')}>
               <Icon name="settings" size={14} /> Manage policies
             </Button>
           </div>
