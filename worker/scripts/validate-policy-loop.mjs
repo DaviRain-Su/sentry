@@ -7,13 +7,12 @@
 // Usage:
 //   node worker/scripts/validate-policy-loop.mjs [--worker-url http://localhost:8787]
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
-import { decodeSuiPrivateKey } from '@mysten/sui/cryptography'
+import { Transaction } from '@mysten/sui/transactions'
 import { strategyHash } from '../src/strategy-core.js'
-import { buildCreatePolicyTx, buildRevokeTx, getClient, readPolicyCreated, DEPLOYMENT } from '../src/sui-tx.js'
+import { getClient, readPolicyCreated, DEPLOYMENT } from '../src/sui-tx.js'
 import { readMandate, readWrapper } from '../src/chain.js'
+import { loadAgentKeypairFromDevVars } from './agent-key-loader.mjs'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -35,11 +34,6 @@ function fail(message, details = undefined) {
 
 function assert(condition, message, details = undefined) {
   if (!condition) fail(message, details)
-}
-
-function envValue(name) {
-  const text = readFileSync(new URL('../.dev.vars', import.meta.url), 'utf8')
-  return text.match(new RegExp(`^${name}=(\\S+)`, 'm'))?.[1] ?? null
 }
 
 function txMeta(tx) {
@@ -83,11 +77,28 @@ function compareFields(label, actual, expected) {
   assert(mismatches.length === 0, `${label} mismatch`, mismatches)
 }
 
+function withoutStrategyHash(strategy) {
+  const { strategy_hash: _strategyHash, ...unsignedStrategy } = strategy
+  return unsignedStrategy
+}
+
 async function getJson(path) {
   const res = await fetch(`${workerUrl}${path}`)
   const json = await res.json().catch(() => null)
   assert(res.ok, `Worker GET ${path} returned HTTP ${res.status}`, json)
   assert(json && json.status !== 'error', `Worker GET ${path} returned an error`, json)
+  return json
+}
+
+async function postJson(path, body) {
+  const res = await fetch(`${workerUrl}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json().catch(() => null)
+  assert(res.ok, `Worker POST ${path} returned HTTP ${res.status}`, json)
+  assert(json && json.status !== 'error', `Worker POST ${path} returned an error`, json)
   return json
 }
 
@@ -117,10 +128,7 @@ function findOwnerActivity(activity, txDigest, titlePart) {
   return (activity || []).find((item) => item.tx === txDigest && String(item.title || '').includes(titlePart))
 }
 
-const key = envValue('AGENT_KEY')
-assert(key, 'AGENT_KEY is missing from worker/.dev.vars')
-
-const keypair = Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(key).secretKey)
+const keypair = loadAgentKeypairFromDevVars()
 const signerAddress = keypair.getPublicKey().toSuiAddress()
 const ownerAddress = signerAddress
 const delegatedAgentAddress = DEPLOYMENT.agent.address
@@ -166,7 +174,15 @@ console.log(JSON.stringify({
   strategy_hash: strategy.strategy_hash,
 }, null, 2))
 
-const createTx = buildCreatePolicyTx({ strategy, ownerAddress })
+const createBuilt = await postJson('/api/policies', {
+  owner: ownerAddress,
+  strategy: withoutStrategyHash(strategy),
+  strategy_hash: strategy.strategy_hash,
+  confirmed: true,
+})
+assert(createBuilt.strategy_hash === strategy.strategy_hash, 'Worker create build returned an unexpected strategy hash', createBuilt)
+assert(createBuilt.agent_address === delegatedAgentAddress, 'Worker create build returned an unexpected agent address', createBuilt)
+const createTx = Transaction.from(createBuilt.tx_json)
 const createSubmitted = await client.signAndExecuteTransaction({
   signer: keypair,
   transaction: createTx,
@@ -185,6 +201,12 @@ assert(hexFromMaybeVector(createEvent?.parsedJson?.strategy_hash) === strategy.s
 
 console.log(JSON.stringify({
   phase: 'created',
+  worker_build_api: {
+    endpoint: 'POST /api/policies',
+    strategy_hash: createBuilt.strategy_hash,
+    agent_address: createBuilt.agent_address,
+    signer: 'scripted AGENT_KEY owner signer',
+  },
   tx: txMeta(createResolved),
   wrapper_id: wrapperId,
   mandate_id: mandateId,
@@ -259,7 +281,13 @@ console.log(JSON.stringify({
   per_policy_event_types: apiActivityAfterCreate.detailActivity.events.map((e) => ({ type: e.type, tx: e.tx, timestamp_ms: e.timestamp_ms })),
 }, null, 2))
 
-const revokeTx = buildRevokeTx({ wrapperId, mandateId, ownerAddress })
+const revokeBuilt = await postJson(`/api/policies/${wrapperId}/revoke`, {
+  owner: ownerAddress,
+  confirmed: true,
+})
+assert(revokeBuilt.wrapper_id === wrapperId, 'Worker revoke build wrapper id mismatch', revokeBuilt)
+assert(revokeBuilt.mandate_id === mandateId, 'Worker revoke build mandate id mismatch', revokeBuilt)
+const revokeTx = Transaction.from(revokeBuilt.tx_json)
 const revokeSubmitted = await client.signAndExecuteTransaction({
   signer: keypair,
   transaction: revokeTx,
@@ -275,6 +303,12 @@ assert(revokeEvent.parsedJson?.mandate_id === mandateId, 'PolicyRevoked mandate 
 
 console.log(JSON.stringify({
   phase: 'revoked',
+  worker_build_api: {
+    endpoint: `POST /api/policies/${wrapperId}/revoke`,
+    wrapper_id: revokeBuilt.wrapper_id,
+    mandate_id: revokeBuilt.mandate_id,
+    signer: 'scripted AGENT_KEY owner signer',
+  },
   tx: txMeta(revokeResolved),
   wrapper_id: wrapperId,
   mandate_id: mandateId,

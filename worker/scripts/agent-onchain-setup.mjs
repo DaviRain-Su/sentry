@@ -2,17 +2,12 @@
 //   1. register the agent's MoveGate passport
 //   2. faucet-mint DBUSDC -> create BalanceManager -> deposit -> share
 // Prints the new passport id + balance_manager id to wire into deployment.
-import { readFileSync } from 'node:fs'
 import { Transaction } from '@mysten/sui/transactions'
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
-import { decodeSuiPrivateKey } from '@mysten/sui/cryptography'
 import { getClient, DEPLOYMENT } from '../src/sui-tx.js'
 import { buildAgentSetupTx } from '../src/deepbook.js'
+import { loadAgentKeypairFromDevVars } from './agent-key-loader.mjs'
 
-const env = readFileSync(new URL('../.dev.vars', import.meta.url), 'utf8')
-const key = env.match(/^AGENT_KEY=(\S+)/m)?.[1]
-if (!key) throw new Error('AGENT_KEY missing in worker/.dev.vars')
-const kp = Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(key).secretKey)
+const kp = loadAgentKeypairFromDevVars()
 const agent = kp.getPublicKey().toSuiAddress()
 const client = getClient()
 const MG = DEPLOYMENT.movegate

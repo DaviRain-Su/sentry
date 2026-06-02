@@ -5,6 +5,7 @@ import { runGuardian } from './guardian.js'
 import { readWrapper, readMandate, readBalanceManagerBalance } from './chain.js'
 import { buildExecutionTx } from './deepbook.js'
 import { DEPLOYMENT } from './sui-tx.js'
+import { keypairFromWorkerEnv } from './secret-safe-signer.js'
 
 /**
  * Pure decision. No I/O.
@@ -102,9 +103,7 @@ export async function runTick(env, p) {
 
   // execute: build + sign + submit (only reached when executionEnabled)
   try {
-    const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519')
-    const { decodeSuiPrivateKey } = await import('@mysten/sui/cryptography')
-    const kp = Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(env.AGENT_KEY).secretKey)
+    const kp = keypairFromWorkerEnv(env)
     const pool = Object.values(DEPLOYMENT.deepbook.pools).find((x) => x.pool_id === wrapper.pool_id)
     const tx = buildExecutionTx({
       wrapperId: p.wrapperId, mandateId: wrapper.mandate_id,

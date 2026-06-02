@@ -1,13 +1,10 @@
 // Try the permissionless DEEP faucet mint (deep::mint(recipient, amount)).
-import { readFileSync } from 'node:fs'
 import { Transaction } from '@mysten/sui/transactions'
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
-import { decodeSuiPrivateKey } from '@mysten/sui/cryptography'
 import { getClient } from '../src/sui-tx.js'
+import { loadAgentKeypairFromDevVars } from './agent-key-loader.mjs'
 
 const DEEP_PKG = '0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8'
-const key = readFileSync(new URL('../.dev.vars', import.meta.url), 'utf8').match(/^AGENT_KEY=(\S+)/m)[1]
-const kp = Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(key).secretKey)
+const kp = loadAgentKeypairFromDevVars()
 const owner = kp.getPublicKey().toSuiAddress()
 const c = getClient()
 const amount = BigInt(process.argv[2] || '10000000') // 10 DEEP (6dp)

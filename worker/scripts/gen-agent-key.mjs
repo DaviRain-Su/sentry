@@ -2,6 +2,7 @@
 // worker/.dev.vars (gitignored) as AGENT_KEY. Prints the address only.
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { keypairFromAgentSecret } from '../src/secret-safe-signer.js'
 
 const path = new URL('../.dev.vars', import.meta.url)
 let env = existsSync(path) ? readFileSync(path, 'utf8') : ''
@@ -9,9 +10,7 @@ const existing = env.match(/^AGENT_KEY=(\S+)/m)
 
 let kp
 if (existing) {
-  const { Ed25519Keypair: KP } = await import('@mysten/sui/keypairs/ed25519')
-  const { decodeSuiPrivateKey } = await import('@mysten/sui/cryptography')
-  kp = KP.fromSecretKey(decodeSuiPrivateKey(existing[1]).secretKey)
+  kp = keypairFromAgentSecret(existing[1], 'worker/.dev.vars AGENT_KEY')
   console.log('reused existing AGENT_KEY')
 } else {
   kp = Ed25519Keypair.generate()

@@ -77,7 +77,7 @@ app.post('/api/policies', async (c) => {
     tx_json: tx.serialize(),
     strategy_hash: recomputed,
     agent_address: AGENT_ADDRESS,
-    sign_with: 'frontend zkLogin (signAndExecuteTransaction); read PolicyCreated for wrapper_id',
+    sign_with: 'owner signer (frontend wallet or scripted Testnet validation key); read PolicyCreated for wrapper_id',
   })
 })
 
@@ -223,7 +223,7 @@ app.post('/api/policies/:wrapper_id/revoke', async (c) => {
       return c.json({ status: 'error', code: 'OWNER_MISMATCH', message: 'Only the policy owner can revoke.' }, 403)
     }
     const tx = buildRevokeTx({ wrapperId, mandateId: wrapper.mandate_id, ownerAddress: wrapper.owner })
-    return c.json({ status: 'ok', tx_json: tx.serialize(), wrapper_id: wrapperId, mandate_id: wrapper.mandate_id, sign_with: 'frontend zkLogin' })
+    return c.json({ status: 'ok', tx_json: tx.serialize(), wrapper_id: wrapperId, mandate_id: wrapper.mandate_id, sign_with: 'owner signer (frontend wallet or scripted Testnet validation key)' })
   } catch (e) {
     return c.json({ status: 'error', code: 'CHAIN_READ_FAILED', message: String((e as Error).message) }, 502)
   }

@@ -3,15 +3,11 @@
 // Proves the live write path end-to-end: mint Mandate + RescuePolicyWrapper,
 // emit PolicyCreated. No DBUSDC needed (only the ~0.01 SUI MoveGate fee).
 //   node scripts/live-create-policy.mjs
-import { readFileSync } from 'node:fs'
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
-import { decodeSuiPrivateKey } from '@mysten/sui/cryptography'
 import { strategyHash } from '../src/strategy-core.js'
 import { buildCreatePolicyTx, getClient, readPolicyCreated, DEPLOYMENT } from '../src/sui-tx.js'
+import { loadAgentKeypairFromDevVars } from './agent-key-loader.mjs'
 
-const key = readFileSync(new URL('../.dev.vars', import.meta.url), 'utf8').match(/^AGENT_KEY=(\S+)/m)?.[1]
-if (!key) throw new Error('AGENT_KEY missing')
-const kp = Ed25519Keypair.fromSecretKey(decodeSuiPrivateKey(key).secretKey)
+const kp = loadAgentKeypairFromDevVars()
 const owner = kp.getPublicKey().toSuiAddress()
 const client = getClient()
 
