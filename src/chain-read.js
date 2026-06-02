@@ -167,21 +167,29 @@ export async function getTransaction(digest) {
   }
 }
 
-// Real SUI/USD daily price history (for backtests) via the public CoinGecko API.
-// Testnet DeepBook has too little trade history to backtest against, so we use
-// real SUI market history — which is what a backtest is meant to evaluate.
-const COINGECKO = 'https://api.coingecko.com/api/v3'
+// Real SUI/USDC daily price history from DeepBook *mainnet* — no third-party API.
+// Testnet DeepBook is too illiquid to backtest against, so we sample the real
+// mainnet SUI/USDC market: one trade price per day across the window (the
+// indexer's /trades supports a start_time/end_time window in seconds).
+const DEEPBOOK_MAINNET = 'https://deepbook-indexer.mainnet.mystenlabs.com'
 export async function getSuiPriceHistory(days = 30) {
   try {
-    const r = await fetch(`${COINGECKO}/coins/sui/market_chart?vs_currency=usd&days=${days}`)
-    if (!r.ok) throw new Error(`coingecko ${r.status}`)
-    const j = await r.json()
-    let prices = (j.prices || []).map((p) => Number(p[1])).filter((n) => n > 0)
-    if (prices.length > 40) {
-      const step = Math.ceil(prices.length / 40)
-      prices = prices.filter((_, i) => i % step === 0 || i === prices.length - 1)
+    const nowSec = Math.floor(Date.now() / 1000)
+    const DAY = 86400
+    const points = Math.min(Math.max(2, days), 30)
+    const reqs = []
+    for (let i = points - 1; i >= 0; i--) {
+      const end = nowSec - i * DAY
+      const start = end - DAY
+      reqs.push(
+        fetch(`${DEEPBOOK_MAINNET}/trades/SUI_USDC?start_time=${start}&end_time=${end}&limit=1`)
+          .then((r) => (r.ok ? r.json() : []))
+          .then((arr) => (Array.isArray(arr) && arr[0] ? Number(arr[0].price) : null))
+          .catch(() => null),
+      )
     }
-    return { status: 'ok', prices }
+    const prices = (await Promise.all(reqs)).filter((p) => p != null && p > 0)
+    return prices.length > 2 ? { status: 'ok', prices } : { status: 'error', message: 'insufficient DeepBook history' }
   } catch (e) {
     return { status: 'error', message: String(e?.message || e) }
   }

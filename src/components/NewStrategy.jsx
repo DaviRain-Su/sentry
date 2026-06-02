@@ -222,7 +222,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
                   <span style={{ color: 'var(--safe)' }}><Icon name="spark" size={16} /></span>
                   <div className="card-title">30-day backtest</div>
                 </div>
-                <span className={`badge ${btLive ? 'badge-accent' : 'badge-neutral'}`} style={{ fontSize: 9.5 }}>{btLive ? 'real SUI/USD · 30d' : 'simulated · last 30d'}</span>
+                <span className={`badge ${btLive ? 'badge-accent' : 'badge-neutral'}`} style={{ fontSize: 9.5 }}>{btLive ? 'real · DeepBook mainnet' : 'simulated · last 30d'}</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, padding: '4px 18px 18px', alignItems: 'center' }}>
                 <div style={{ background: 'var(--bg-0)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: '12px 14px' }}>
@@ -242,7 +242,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
                     ))}
                   </div>
                   <div style={{ fontSize: 12.5, color: 'var(--t1)', lineHeight: 1.5 }}>{BT.verdict}</div>
-                  {btLive && <div style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 8 }}>Simulated on real SUI/USD daily closes (CoinGecko) using your parsed threshold + budget. Past performance is not indicative of future results.</div>}
+                  {btLive && <div style={{ fontSize: 10.5, color: 'var(--t3)', marginTop: 8 }}>Simulated on real SUI/USDC daily prices from DeepBook mainnet using your parsed threshold + budget. Past performance is not indicative of future results.</div>}
                 </div>
               </div>
             </div>
