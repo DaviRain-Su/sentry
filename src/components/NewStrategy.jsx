@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useCurrentAccount } from '@mysten/dapp-kit'
 import { RG } from '../data.js'
 import { Icon, Sparkline } from './primitives.jsx'
-import { Slider } from '@heroui/react'
+import { Slider, Button } from '@heroui/react'
 import { WORKER_CONFIGURED, parseIntent as parseWorkerIntent, getSuiPriceHistory } from '../api.js'
 import { parseIntent as parseLocalIntent } from '../../core/strategy.js'
 import { runBacktest } from '../../core/backtest.js'
@@ -161,9 +161,9 @@ export function NewStrategy({ onDone, mode, setMode }) {
             </button>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
-            <button className="btn btn-primary" disabled={!text.trim() || parsing} onClick={parse}>
+            <Button className="bg-accent text-accent-foreground font-semibold" isDisabled={!text.trim() || parsing} onPress={parse}>
               {parsing ? <><Icon name="refresh" size={15} style={{ animation: 'spin 1s linear infinite' }} /> Parsing intent…</> : <>Parse intent <Icon name="chevR" size={15} /></>}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -309,10 +309,10 @@ export function NewStrategy({ onDone, mode, setMode }) {
           )}
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <button className="btn btn-ghost" onClick={() => setStep(0)}><Icon name="chevL" size={15} /> Edit intent</button>
+            <Button variant="bordered" onPress={() => setStep(0)}><Icon name="chevL" size={15} /> Edit intent</Button>
             {blocked
-              ? <button className="btn" disabled style={{ opacity: .5 }}><Icon name="x" size={15} /> Blocked by Guardian</button>
-              : <button className="btn btn-primary" onClick={() => setStep(2)}>Configure policy <Icon name="chevR" size={15} /></button>}
+              ? <Button isDisabled className="opacity-50"><Icon name="x" size={15} /> Blocked by Guardian</Button>
+              : <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => setStep(2)}>Configure policy <Icon name="chevR" size={15} /></Button>}
           </div>
         </div>
       )}
@@ -378,8 +378,8 @@ export function NewStrategy({ onDone, mode, setMode }) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 26 }}>
-            <button className="btn btn-ghost" onClick={() => setStep(1)}><Icon name="chevL" size={15} /> Back</button>
-            <button className="btn btn-primary" onClick={() => setStep(3)}>Choose run mode <Icon name="chevR" size={15} /></button>
+            <Button variant="bordered" onPress={() => setStep(1)}><Icon name="chevL" size={15} /> Back</Button>
+            <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => setStep(3)}>Choose run mode <Icon name="chevR" size={15} /></Button>
           </div>
         </div>
       )}
@@ -435,8 +435,8 @@ export function NewStrategy({ onDone, mode, setMode }) {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <button className="btn btn-ghost" onClick={() => setStep(2)}><Icon name="chevL" size={15} /> Back</button>
-            <button className="btn btn-primary" onClick={() => onDone(meta, text)}><Icon name="shield" size={15} /> {readOnlyPreview ? 'Preview only · connect wallet' : 'Sign & deploy policy'}</button>
+            <Button variant="bordered" onPress={() => setStep(2)}><Icon name="chevL" size={15} /> Back</Button>
+            <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => onDone(meta, text)}><Icon name="shield" size={15} /> {readOnlyPreview ? 'Preview only · connect wallet' : 'Sign & deploy policy'}</Button>
           </div>
         </div>
       )}
