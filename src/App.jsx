@@ -54,12 +54,9 @@ function mixHex(hex, toward, t) {
 
 function NavItem({ icon, label, active, onClick, badge }) {
   return (
-    <button onClick={onClick} className="rg-navitem" style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 13px',
-      borderRadius: 'var(--r-md)', border: 'none', cursor: 'pointer', textAlign: 'left', position: 'relative',
-      background: active ? 'var(--glass-hi)' : 'transparent', color: active ? 'var(--t0)' : 'var(--t1)',
-      fontFamily: 'var(--f-body)', fontSize: 13.5, fontWeight: active ? 600 : 500, transition: 'all .14s' }}>
-      {active && <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 18, borderRadius: 4, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent-glow)' }} />}
-      <span style={{ color: active ? 'var(--accent)' : 'var(--t2)' }}><Icon name={icon} size={18} /></span>
+    <button onClick={onClick} className={`rg-navitem${active ? ' is-active' : ''}`}>
+      <span className="rg-navlamp" aria-hidden="true" />
+      <span className="rg-navicon"><Icon name={icon} size={18} /></span>
       <span className="rg-navlabel" style={{ flex: 1 }}>{label}</span>
       {badge != null && <span className="badge badge-accent" style={{ fontSize: 9.5, padding: '2px 7px' }}>{badge}</span>}
     </button>
@@ -68,6 +65,7 @@ function NavItem({ icon, label, active, onClick, badge }) {
 
 export default function App({ onExit }) {
   const [authed, setAuthed] = useState(false)
+  const [sessionMode, setSessionMode] = useState('signed-out')
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS)
   const [view, setView] = useState('dashboard')
   const [inspect, setInspect] = useState(null)
@@ -101,11 +99,11 @@ export default function App({ onExit }) {
   const suiClient = useSuiClient()
   const { mutateAsync: signAndExec } = useSignAndExecuteTransaction()
   const { mutate: disconnect } = useDisconnectWallet()
-  const liveMode = !!account
-  const readOnlyLiveMode = !account && WORKER_CONFIGURED
+  const liveMode = sessionMode === 'wallet' && !!account
+  const readOnlyLiveMode = sessionMode === 'readonly' && WORKER_CONFIGURED
   const liveReadsEnabled = liveMode || readOnlyLiveMode
-  const owner = account?.address || (readOnlyLiveMode ? deployment.agent.address : RG.user.addr)
-  const ownerShort = account
+  const owner = liveMode ? account.address : (readOnlyLiveMode ? deployment.agent.address : RG.user.addr)
+  const ownerShort = liveMode
     ? owner.slice(0, 6) + '…' + owner.slice(-4)
     : readOnlyLiveMode
       ? `agent ${owner.slice(0, 6)}…${owner.slice(-4)}`
@@ -143,6 +141,13 @@ export default function App({ onExit }) {
   }, [])
   const pushNotif = (kind, title) => setNotifs(n => [{ id: ++notifId.current, kind, title, time: 'now', read: false }, ...n])
   const unread = notifs.filter(n => !n.read).length
+
+  useEffect(() => {
+    if (authed && sessionMode === 'wallet' && !account) {
+      setSessionMode('signed-out')
+      setAuthed(false)
+    }
+  }, [account, authed, sessionMode])
 
   const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = [] }
   const after = (ms, fn) => timers.current.push(setTimeout(fn, ms))
@@ -367,12 +372,25 @@ export default function App({ onExit }) {
   }
 
   const logout = () => {
-    if (account) disconnect()
-    // autoConnect would silently re-connect the wallet on next launch — clear
-    // dapp-kit's stored connection so logout actually sticks.
-    try { Object.keys(localStorage).forEach(k => { if (/dapp-kit/i.test(k)) localStorage.removeItem(k) }) } catch { /* ignore */ }
-    setAuthed(false)
-    onExit && onExit()
+    const finish = () => {
+      // clear dapp-kit's stored connection so it can't silently re-auth on next launch
+      try { Object.keys(localStorage).forEach(k => { if (/dapp-kit/i.test(k)) localStorage.removeItem(k) }) } catch { /* ignore */ }
+      setSessionMode('signed-out')
+      setAuthed(false)
+      onExit && onExit()
+    }
+    // disconnect() is an async react-query mutation — it does NOT clear
+    // useCurrentAccount() synchronously. If we flip auth before it settles,
+    // ZkLogin remounts, still sees the old account, and its effect re-auths us
+    // straight back in (a visible login<->dashboard bounce). Wait for the
+    // disconnect to settle (account -> null) before unmounting to the login screen.
+    if (account) disconnect(undefined, { onSettled: finish })
+    else finish()
+  }
+
+  const handleAuth = (kind = 'demo') => {
+    setSessionMode(kind)
+    setAuthed(true)
   }
 
   const shownActivity = liveReadsEnabled ? liveActivity : activity
@@ -381,7 +399,7 @@ export default function App({ onExit }) {
   if (!authed) return (
     <>
       <div className="app-bg"></div>
-      <ZkLogin onAuth={() => setAuthed(true)} onBackToLanding={onExit} />
+      <ZkLogin onAuth={handleAuth} onBackToLanding={onExit} workerConfigured={WORKER_CONFIGURED} />
     </>
   )
 
@@ -405,83 +423,80 @@ export default function App({ onExit }) {
       <div style={{ display: 'flex', height: '100vh', position: 'relative', zIndex: 1 }}>
         {/* sidebar */}
         <aside className="rg-sidebar" style={{ width: 'var(--sidebar-w)', flexShrink: 0, borderRight: '1px solid var(--border)',
-          display: 'flex', flexDirection: 'column', padding: '20px 16px', background: 'rgba(8,11,17,0.6)', backdropFilter: 'blur(10px)' }}>
-          <div style={{ padding: '0 8px 8px', cursor: 'pointer' }} onClick={onExit}><Logo /></div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 18 }}>
-            <div className="eyebrow" style={{ padding: '0 13px 8px' }}>Workspace</div>
-            <NavItem icon="dashboard" label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
-            <NavItem icon="activity" label="Agent activity" active={view === 'activity'} onClick={() => setView('activity')} badge={shownActivity.length} />
-            <NavItem icon="radar" label="Markets monitor" active={view === 'markets'} onClick={() => setView('markets')} />
-            <NavItem icon="grid" label="Strategy catalog" active={view === 'strategies' || view === 'strategy-detail'} onClick={() => setView('strategies')} />
-            <NavItem icon="shield" label="Policies" active={view === 'policies'} onClick={() => setView('policies')} />
-            <NavItem icon="alert" label="Risk center" active={view === 'risk'} onClick={() => setView('risk')} />
-            <NavItem icon="globe" label="Data sources" active={view === 'data'} onClick={() => setView('data')} />
-            <NavItem icon="wallet" label="Profile & wallet" active={view === 'profile'} onClick={() => setView('profile')} />
-          </div>
-          <Button className="mt-[18px] bg-accent text-accent-foreground font-semibold" fullWidth onPress={() => setView('new')}
-            startContent={<Icon name="plus" size={16} stroke={2.4} />}>
-            <span className="rg-navlabel">New strategy</span>
-          </Button>
-
-          <div style={{ flex: 1 }} />
-
-          {/* mode + agent toggle */}
-          <div className="card rg-agentcard" style={{ padding: 14, marginBottom: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span className="eyebrow">Agent</span>
-              <button onClick={() => setAgentOn(v => !v)} style={{ width: 38, height: 22, borderRadius: 100, border: 'none', cursor: 'pointer', position: 'relative',
-                background: agentOn ? 'var(--accent)' : 'var(--glass-hi)', transition: 'all .18s' }}>
-                <div style={{ position: 'absolute', top: 2, left: agentOn ? 18 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'all .18s' }} />
-              </button>
+          display: 'flex', flexDirection: 'column', padding: '20px 16px', background: 'var(--chrome-sidebar)', backdropFilter: 'blur(10px)', overflow: 'hidden' }}>
+          <div className="rg-sidebar-scroll">
+            <div style={{ padding: '0 8px 8px', cursor: 'pointer' }} onClick={onExit}><Logo /></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 18 }}>
+              <div className="eyebrow" style={{ padding: '0 13px 8px' }}>Workspace</div>
+              <NavItem icon="dashboard" label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+              <NavItem icon="activity" label="Agent activity" active={view === 'activity'} onClick={() => setView('activity')} badge={shownActivity.length} />
+              <NavItem icon="radar" label="Markets monitor" active={view === 'markets'} onClick={() => setView('markets')} />
+              <NavItem icon="grid" label="Strategy catalog" active={view === 'strategies' || view === 'strategy-detail'} onClick={() => setView('strategies')} />
+              <NavItem icon="shield" label="Policies" active={view === 'policies'} onClick={() => setView('policies')} />
+              <NavItem icon="alert" label="Risk center" active={view === 'risk'} onClick={() => setView('risk')} />
+              <NavItem icon="globe" label="Data sources" active={view === 'data'} onClick={() => setView('data')} />
+              <NavItem icon="wallet" label="Profile & wallet" active={view === 'profile'} onClick={() => setView('profile')} />
             </div>
-            <div style={{ display: 'flex', gap: 6, background: 'var(--bg-0)', borderRadius: 'var(--r-sm)', padding: 4 }}>
-              {[{ id: 'local', icon: 'cpu', l: 'Local' }, { id: 'cloud', icon: 'cloud', l: 'Cloud' }].map(m => (
-                <button key={m.id} onClick={() => setMode(m.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                  padding: '7px 0', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'var(--f-body)', fontSize: 12, fontWeight: 600,
-                  background: mode === m.id ? 'var(--glass-hi)' : 'transparent', color: mode === m.id ? 'var(--accent)' : 'var(--t2)', transition: 'all .14s' }}>
-                  <Icon name={m.icon} size={14} /> {m.l}
+            <Button className="mt-[18px] bg-accent text-accent-foreground font-semibold" fullWidth onPress={() => setView('new')}
+              startContent={<Icon name="plus" size={16} stroke={2.4} />}>
+              <span className="rg-navlabel">New strategy</span>
+            </Button>
+
+            <div style={{ flex: 1, minHeight: 12 }} />
+
+            {/* mode + agent toggle */}
+            <div className="card rg-agentcard" style={{ padding: 14, marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span className="eyebrow">Agent</span>
+                <button onClick={() => setAgentOn(v => !v)} style={{ width: 38, height: 22, borderRadius: 100, border: 'none', cursor: 'pointer', position: 'relative',
+                  background: agentOn ? 'var(--accent)' : 'var(--glass-hi)', transition: 'all .18s' }}>
+                  <div style={{ position: 'absolute', top: 2, left: agentOn ? 18 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'all .18s' }} />
                 </button>
-              ))}
-            </div>
-            {/* gas sponsorship note */}
-            <div style={{ display: 'flex', gap: 8, marginTop: 8, padding: '9px 10px', borderRadius: 'var(--r-sm)', background: 'var(--glass)' }}>
-              <span style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }}><Icon name="bolt" size={14} /></span>
-              <div style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--t1)' }}>
-                Gas is <strong style={{ color: 'var(--t0)' }}>sponsored</strong> — the agent pays fees from a gas station, so it acts without SUI of its own.
+              </div>
+              <div style={{ display: 'flex', gap: 6, background: 'var(--bg-0)', borderRadius: 'var(--r-sm)', padding: 4 }}>
+                {[{ id: 'local', icon: 'cpu', l: 'Local' }, { id: 'cloud', icon: 'cloud', l: 'Cloud' }].map(m => (
+                  <button key={m.id} onClick={() => setMode(m.id)} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    padding: '7px 0', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'var(--f-body)', fontSize: 12, fontWeight: 600,
+                    background: mode === m.id ? 'var(--glass-hi)' : 'transparent', color: mode === m.id ? 'var(--accent)' : 'var(--t2)', transition: 'all .14s' }}>
+                    <Icon name={m.icon} size={14} /> {m.l}
+                  </button>
+                ))}
+              </div>
+              {/* gas sponsorship note */}
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, padding: '9px 10px', borderRadius: 'var(--r-sm)', background: 'var(--glass)' }}>
+                <span style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }}><Icon name="bolt" size={14} /></span>
+                <div style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--t1)' }}>
+                  Gas is <strong style={{ color: 'var(--t0)' }}>sponsored</strong> — the agent pays fees from a gas station, so it acts without SUI of its own.
+                </div>
               </div>
             </div>
+
+            {/* emergency circuit breaker */}
+            {halted ? (
+              <Button className="mb-3 bg-accent text-accent-foreground font-semibold" fullWidth onPress={resumeAgents}
+                startContent={<Icon name="refresh" size={15} />}>
+                <span className="rg-navlabel">Resume agents</span>
+              </Button>
+            ) : (
+              <Button className="mb-3 bg-danger text-white font-semibold" fullWidth onPress={emergencyStop}
+                startContent={<Icon name="alert" size={15} />}>
+                <span className="rg-navlabel">Emergency stop</span>
+              </Button>
+            )}
           </div>
 
-          {/* emergency circuit breaker */}
-          {halted ? (
-            <Button className="mb-3 bg-accent text-accent-foreground font-semibold" fullWidth onPress={resumeAgents}
-              startContent={<Icon name="refresh" size={15} />}>
-              <span className="rg-navlabel">Resume agents</span>
-            </Button>
-          ) : (
-            <Button className="mb-3 bg-danger text-white font-semibold" fullWidth onPress={emergencyStop}
-              startContent={<Icon name="alert" size={15} />}>
-              <span className="rg-navlabel">Emergency stop</span>
-            </Button>
-          )}
-
           {/* user */}
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-            <div onClick={() => setView('profile')} title="Profile & wallet" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', cursor: 'pointer', borderRadius: 'var(--r-md)' }}>
+          <div className="rg-sidebar-footer">
+            <div onClick={() => setView('profile')} title="Profile & wallet" className="rg-profile-row">
               <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 9, background: 'linear-gradient(135deg,#2EE6CE,#5AA6FF)', color: '#06231f',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{account ? owner.slice(2, 4).toUpperCase() : readOnlyLiveMode ? 'AG' : RG.user.avatar}</div>
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, fontFamily: 'var(--f-mono)' }}>{liveMode ? owner.slice(2, 4).toUpperCase() : readOnlyLiveMode ? 'AG' : RG.user.avatar}</div>
               <div className="rg-userblock" style={{ flex: 1, minWidth: 0 }}>
                 <div className="mono" style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ownerShort}</div>
-                <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{account ? 'Sui wallet · testnet' : readOnlyLiveMode ? 'Worker live reads · no signing' : RG.user.provider}</div>
+                <div className="mono" style={{ fontSize: 10.5, color: 'var(--t2)' }}>{liveMode ? 'Sui wallet · testnet' : readOnlyLiveMode ? 'Worker live reads · no signing' : RG.user.provider}</div>
               </div>
             </div>
             {/* explicit, labeled log out */}
-            <button onClick={logout} title="Log out"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', marginTop: 4, padding: '9px 10px',
-                background: 'transparent', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', cursor: 'pointer',
-                color: 'var(--t1)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', transition: 'all .14s' }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--danger-dim)'; e.currentTarget.style.color = 'var(--danger)'; e.currentTarget.style.borderColor = 'var(--danger)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t1)'; e.currentTarget.style.borderColor = 'var(--border)' }}>
+            <button onClick={logout} title="Log out" className="rg-logout-btn">
               <Icon name="logout" size={15} /> <span className="rg-navlabel">Log out</span>
             </button>
           </div>
@@ -491,7 +506,7 @@ export default function App({ onExit }) {
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           {/* topbar */}
           <header style={{ height: 'var(--topbar-h)', flexShrink: 0, borderBottom: '1px solid var(--border)', display: 'flex',
-            alignItems: 'center', padding: '0 26px', gap: 20, background: 'rgba(8,11,17,0.5)', backdropFilter: 'blur(10px)' }}>
+            alignItems: 'center', padding: '0 26px', gap: 20, background: 'var(--chrome-topbar)', backdropFilter: 'blur(10px)' }}>
             <div style={{ flex: 1 }}>
               <h1 className="display" style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em' }}>{titles[view].t}</h1>
               <div className="rg-subtitle" style={{ fontSize: 11.5, color: 'var(--t2)' }}>{titles[view].s}</div>
@@ -533,7 +548,7 @@ export default function App({ onExit }) {
               {notifOpen && (
                 <>
                   <div onClick={() => setNotifOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-                  <div className="card fade-up" style={{ position: 'absolute', top: 44, right: 0, width: 320, zIndex: 61, padding: 0, overflow: 'hidden', boxShadow: '0 20px 50px -16px rgba(0,0,0,0.6)' }}>
+                  <div className="card fade-up" style={{ position: 'absolute', top: 44, right: 0, width: 320, zIndex: 61, padding: 0, overflow: 'hidden', boxShadow: 'var(--popover-shadow)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
                       <span className="card-title">Notifications</span>
                       <span className="badge badge-neutral" style={{ fontSize: 9.5 }}>{notifs.length}</span>
@@ -628,11 +643,11 @@ export default function App({ onExit }) {
               holdings={liveReadsEnabled ? liveHoldings : RG.holdings}
               funding={liveReadsEnabled ? liveFunding : null}
               account={liveReadsEnabled ? {
-                avatar: account ? owner.slice(2, 4).toUpperCase() : 'AG',
+                avatar: liveMode ? owner.slice(2, 4).toUpperCase() : 'AG',
                 handle: ownerShort,
                 addr: ownerShort,
                 fullAddr: owner,
-                provider: account ? (currentWallet?.name || 'Sui wallet') : 'RescueGrid Worker',
+                provider: liveMode ? (currentWallet?.name || 'Sui wallet') : 'RescueGrid Worker',
                 network: 'Sui Testnet',
               } : RG.account}
               onNav={setView}
