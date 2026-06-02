@@ -49,6 +49,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: worker/package-lock.json
 
+      - name: Install root deps (shared core/ imports @noble/hashes)
+        working-directory: .
+        run: npm ci
+
       - name: Install dependencies
         run: npm ci
 
@@ -62,10 +66,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Sui CLI
-        uses: mystenlabs/sui-cli-action@v1
-        with:
-          version: 'mainnet'
+      - name: Install Sui CLI (latest testnet release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/MystenLabs/sui/releases?per_page=40" \
+            | jq -r '[.[] | select(.tag_name|test("testnet"))][0].tag_name')
+          echo "Installing Sui $TAG"
+          curl -fL "https://github.com/MystenLabs/sui/releases/download/${TAG}/sui-${TAG}-ubuntu-x86_64.tgz" -o /tmp/sui.tgz
+          mkdir -p "$HOME/.sui-bin"
+          tar -xzf /tmp/sui.tgz -C "$HOME/.sui-bin"
+          echo "$HOME/.sui-bin" >> "$GITHUB_PATH"
+          "$HOME/.sui-bin/sui" --version
 
       - name: Test MoveGate
         working-directory: move/movegate
