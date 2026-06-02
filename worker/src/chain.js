@@ -5,6 +5,7 @@
 // and runtime_state_stale flips when it disagrees with chain.
 import { getClient, DEPLOYMENT } from './sui-tx.js'
 import { Transaction } from '@mysten/sui/transactions'
+import { bytesToHex, enrichPolicyFromChain } from './read-surfaces.js'
 
 const RG = DEPLOYMENT.rescuegrid
 
@@ -26,6 +27,7 @@ export async function readWrapper(client, wrapperId) {
     budget_ceiling: String(f.budget_ceiling),
     spent_amount: String(f.spent_amount),
     max_slippage_bps: Number(f.max_slippage_bps),
+    strategy_hash: bytesToHex(f.strategy_hash),
   }
 }
 
@@ -83,11 +85,14 @@ export async function listPoliciesByOwner(owner) {
       if (!String(e.type).endsWith('::policy::PolicyCreated')) continue
       const pj = e.parsedJson || {}
       if (pj.owner !== owner) continue
-      out.push({
+      const eventPolicy = {
         wrapper_id: pj.wrapper_id, mandate_id: pj.mandate_id, owner: pj.owner, agent: pj.agent,
         pool_id: pj.pool_id, budget_ceiling: String(pj.budget_ceiling), max_slippage_bps: Number(pj.max_slippage_bps),
-        expires_at_ms: String(pj.expires_at_ms), created_tx: e.id?.txDigest,
-      })
+        expires_at_ms: String(pj.expires_at_ms),
+      }
+      const wrapper = await readWrapper(client, pj.wrapper_id)
+      const mandate = wrapper ? await readMandate(client, wrapper.mandate_id) : null
+      out.push(enrichPolicyFromChain({ eventPolicy, wrapper, mandate, createdTx: e.id?.txDigest }))
     }
     if (!res.hasNextPage) break
     cursor = res.nextCursor
@@ -239,12 +244,17 @@ export async function getActivity(wrapperId, nowMs = Date.now()) {
       policy_id: wrapperId,
       mandate_id: wrapper.mandate_id,
       wrapper_id: wrapperId,
+      owner: wrapper.owner,
+      agent: wrapper.agent,
       runtime_state,
       runtime_state_stale: false, // chain-derived in MVP until DO supplies live state
+      status: revoked ? 'revoked' : expired ? 'expired' : 'active',
       budget_ceiling: wrapper.budget_ceiling,
       spent_amount: wrapper.spent_amount,
+      budget_coin_type: wrapper.budget_coin_type,
       pool_id: wrapper.pool_id,
       max_slippage_bps: wrapper.max_slippage_bps,
+      strategy_hash: wrapper.strategy_hash,
       revoked,
       expires_at_ms,
     },

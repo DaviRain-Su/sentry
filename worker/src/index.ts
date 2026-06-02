@@ -6,9 +6,10 @@ import { cors } from 'hono/cors'
 import { parseIntent } from './parse.js'
 import { strategyHash } from './strategy-core.js'
 import { buildCreatePolicyTx, buildRevokeTx } from './sui-tx.js'
-import { getActivity, listPoliciesByOwner, listActivityByOwner, getOwnerSummary, getMarket, getBalances, readWrapper } from './chain.js'
-import { getClient } from './sui-tx.js'
+import { getActivity, listPoliciesByOwner, listActivityByOwner, getOwnerSummary, getMarket, getBalances, readWrapper, readBalanceManagerBalance } from './chain.js'
+import { getClient, DEPLOYMENT } from './sui-tx.js'
 import { runTick } from './tick.js'
+import { buildFundingReadiness, parseIntentWithStability } from './read-surfaces.js'
 import { AGENT_ADDRESS } from './config.js'
 import { DEFAULT_TICK_INTERVAL_SECONDS } from './config.js'
 import type { ParseDefaults, Strategy } from './types.js'
@@ -24,6 +25,7 @@ export interface Env {
 }
 
 const app = new Hono<{ Bindings: Env }>()
+const parseCache = new Map<string, Record<string, unknown>>()
 
 app.use('/api/*', cors())
 
@@ -37,10 +39,13 @@ app.post('/api/intents/parse', async (c) => {
   } catch {
     return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid JSON body.' }, 400)
   }
-  if (!body.owner || !body.text) {
+  if (!body || typeof body !== 'object') {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'JSON body must be an object.' }, 400)
+  }
+  if (!body.owner || !/^0x[0-9a-fA-F]+$/.test(body.owner) || !body.text || typeof body.text !== 'string') {
     return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'owner and text are required.' }, 400)
   }
-  const result = parseIntent(body.text, body.owner, body.defaults ?? {})
+  const result = parseIntentWithStability(parseIntent, parseCache, body)
   return c.json(result, result.status === 'ok' ? 200 : 422)
 })
 
@@ -151,7 +156,39 @@ app.get('/api/balances', async (c) => {
     return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'owner query param required.' }, 400)
   }
   try {
-    return c.json({ status: 'ok', holdings: await getBalances(owner) })
+    const client = getClient()
+    const [holdings, dbusdcBalance, deepBalance, suiBalance] = await Promise.all([
+      getBalances(owner),
+      readBalanceManagerBalance(client, DEPLOYMENT.deepbook.dbusdc_coin_type),
+      readBalanceManagerBalance(client, DEPLOYMENT.deepbook.deep_coin_type),
+      client.getBalance({ owner: DEPLOYMENT.agent.address, coinType: '0x2::sui::SUI' }),
+    ])
+    const funding = buildFundingReadiness({
+      agentAddress: DEPLOYMENT.agent.address,
+      balanceManagerId: DEPLOYMENT.agent.balance_manager_id,
+      dbusdcBalance: dbusdcBalance.toString(),
+      deepBalance: deepBalance.toString(),
+      suiBalanceMist: String(suiBalance.totalBalance ?? '0'),
+      executionEnabled: c.env.EXECUTION_ENABLED === 'true',
+    })
+    return c.json({
+      status: 'ok',
+      owner,
+      holdings,
+      agent: { address: DEPLOYMENT.agent.address, balance_manager_id: DEPLOYMENT.agent.balance_manager_id },
+      balance_manager: {
+        id: DEPLOYMENT.agent.balance_manager_id,
+        holder: 'agent_balance_manager',
+        balances: { DBUSDC: funding.balances.DBUSDC, DEEP: funding.balances.DEEP },
+      },
+      sui_gas: { holder: DEPLOYMENT.agent.address, balance_mist: funding.balances.SUI_MIST },
+      funding,
+      readiness_state: funding.readiness_state,
+      ready: funding.ready,
+      blockers: funding.blockers,
+      blocker_labels: funding.blocker_labels,
+      blocker_codes: funding.blocker_codes,
+    })
   } catch (e) {
     return c.json({ status: 'error', code: 'CHAIN_READ_FAILED', message: String((e as Error).message) }, 502)
   }
