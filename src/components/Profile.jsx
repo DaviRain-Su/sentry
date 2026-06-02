@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { RG } from '../data.js'
 import { Icon, Token, useAnimatedNumber, fmtUsd } from './primitives.jsx'
+import { Button } from '@heroui/react'
 
 function CopyChip({ text, label, full }) {
   const [copied, setCopied] = useState(false)
@@ -92,9 +93,9 @@ export function Profile({ account, holdings, policies, live = false, readOnly = 
             <div className="badge badge-safe"><span className="dot pulse"></span>{a.network}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <CopyChip text={a.addr} full={a.fullAddr} />
-              <button onClick={() => onToast && onToast('Opening SuiScan explorer…', 'var(--sui)')} className="btn btn-sm btn-ghost" style={{ color: 'var(--sui)' }}>
+              <Button size="sm" variant="light" className="text-[color:var(--sui)]" onPress={() => { if (live && a.fullAddr) window.open('https://suiscan.xyz/testnet/account/' + a.fullAddr, '_blank', 'noopener,noreferrer'); else onToast && onToast('Connect a wallet to view it on SuiScan', 'var(--sui)') }}>
                 <Icon name="link" size={13} /> SuiScan
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -118,12 +119,12 @@ export function Profile({ account, holdings, policies, live = false, readOnly = 
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn btn-primary btn-sm" onClick={() => onToast && onToast('Deposit address copied — send USDC or SUI on Sui', 'var(--accent)')}>
+            <Button size="sm" className="bg-accent text-accent-foreground font-semibold" onPress={() => onToast && onToast('Deposit address copied — send USDC or SUI on Sui', 'var(--accent)')}>
               <Icon name="arrowDown" size={14} stroke={2.2} /> Deposit
-            </button>
-            <button className="btn btn-sm" onClick={() => onToast && onToast(live ? 'Withdrawals are signed in your wallet' : 'Withdrawals require your zkLogin signature', 'var(--sui)')}>
+            </Button>
+            <Button size="sm" variant="bordered" onPress={() => onToast && onToast(live ? 'Withdrawals are signed in your wallet' : 'Withdrawals require your zkLogin signature', 'var(--sui)')}>
               <Icon name="arrowUp" size={14} stroke={2.2} /> Withdraw
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -302,9 +303,9 @@ export function Profile({ account, holdings, policies, live = false, readOnly = 
                 </div>
               ))}
             </div>
-            <button className="btn btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => onNav && onNav('policies')}>
+            <Button size="sm" variant="bordered" fullWidth onPress={() => onNav && onNav('policies')}>
               <Icon name="settings" size={14} /> Manage policies
-            </button>
+            </Button>
           </div>
 
           {/* gas: live = real self-paid posture; demo = sponsored persona */}
