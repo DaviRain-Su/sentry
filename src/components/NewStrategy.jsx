@@ -148,17 +148,17 @@ export function NewStrategy({ onDone, mode, setMode }) {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
             {RG.examples.map(ex => (
-              <button key={ex} onClick={() => setText(ex)}
-                style={{ background: 'var(--glass-2)', border: '1px solid var(--border)', borderRadius: 100, color: 'var(--t1)',
-                  fontSize: 12, padding: '7px 13px', cursor: 'pointer', fontFamily: 'var(--f-body)' }}>
-                <span style={{ color: 'var(--accent)', marginRight: 6 }}>＋</span>{ex}
-              </button>
+              <Button key={ex} size="sm" radius="full" variant="bordered" onPress={() => setText(ex)}
+                className="border-[color:var(--border)] bg-[color:var(--glass-2)] text-[color:var(--t1)] text-xs font-normal"
+                startContent={<span style={{ color: 'var(--accent)' }}>＋</span>}>
+                {ex}
+              </Button>
             ))}
-            <button onClick={() => setText(RG.riskyExample)}
-              style={{ background: 'var(--danger-dim)', border: '1px solid rgba(255,84,112,0.35)', borderRadius: 100, color: 'var(--danger)',
-                fontSize: 12, padding: '7px 13px', cursor: 'pointer', fontFamily: 'var(--f-body)' }}>
-              <span style={{ marginRight: 6 }}>⚠</span>Try a risky one (Guardian blocks it)
-            </button>
+            <Button size="sm" radius="full" variant="bordered" onPress={() => setText(RG.riskyExample)}
+              className="border-[rgba(255,84,112,0.35)] bg-[color:var(--danger-dim)] text-[color:var(--danger)] text-xs font-normal"
+              startContent={<span>⚠</span>}>
+              Try a risky one (Guardian blocks it)
+            </Button>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
             <Button className="bg-accent text-accent-foreground font-semibold" isDisabled={!text.trim() || parsing} onPress={parse}>
