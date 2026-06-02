@@ -48,7 +48,29 @@ function perTradeAmount(wrapper) {
   return (rung < remaining ? rung : remaining)
 }
 
-async function checkFunding(client, proposed) {
+export function fundingReadinessBlock(funding) {
+  const blockers = funding?.blockers ?? []
+  if (blockers.length === 0) return null
+  const primary = funding.funding_blockers?.[0] ?? blockers[0]
+  return {
+    code: primary.code,
+    detail: `Execution blocked: ${blockers.map((b) => b.label).join('; ')}.`,
+    balances: {
+      dbusdc: funding.balances.DBUSDC,
+      deep: funding.balances.DEEP,
+      sui_mist: funding.balances.SUI_MIST,
+      dbusdc_required: funding.thresholds.DBUSDC.required,
+      deep_required: funding.thresholds.DEEP.required,
+      sui_mist_required: funding.thresholds.SUI_MIST.required,
+    },
+    funding,
+    execution_claimed: false,
+    blocker_codes: funding.blocker_codes,
+    blocker_labels: funding.blocker_labels,
+  }
+}
+
+async function checkFunding(client, proposed, executionEnabled) {
   const [dbusdcBalance, deepBalance, suiBalance] = await Promise.all([
     readBalanceManagerBalance(client, DEPLOYMENT.deepbook.dbusdc_coin_type),
     readBalanceManagerBalance(client, DEPLOYMENT.deepbook.deep_coin_type),
@@ -60,30 +82,12 @@ async function checkFunding(client, proposed) {
     dbusdcBalance: dbusdcBalance.toString(),
     deepBalance: deepBalance.toString(),
     suiBalanceMist: String(suiBalance.totalBalance ?? '0'),
-    executionEnabled: true,
+    executionEnabled,
     requiredDbusdcBalance: proposed.amount,
     requiredDeepBalance: '1',
     requiredSuiGasMist: '1',
   })
-  if (!funding.funding_ready) {
-    const primary = funding.funding_blockers[0]
-    return {
-      code: primary.code,
-      detail: `Execution blocked: ${primary.label} (${primary.observed} observed, ${primary.required} required).`,
-      balances: {
-        dbusdc: funding.balances.DBUSDC,
-        deep: funding.balances.DEEP,
-        sui_mist: funding.balances.SUI_MIST,
-        dbusdc_required: funding.thresholds.DBUSDC.required,
-        deep_required: funding.thresholds.DEEP.required,
-        sui_mist_required: funding.thresholds.SUI_MIST.required,
-      },
-      funding,
-      blocker_codes: funding.blocker_codes,
-      blocker_labels: funding.blocker_labels,
-    }
-  }
-  return null
+  return fundingReadinessBlock(funding)
 }
 
 /**
@@ -109,10 +113,10 @@ export async function runTick(env, p) {
   }
   const executionEnabled = env?.EXECUTION_ENABLED === 'true' && !!env?.AGENT_KEY
 
-  const decision = decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, executionEnabled })
+  const decision = decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, executionEnabled: true })
   if (decision.action !== 'execute') return { ...decision, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
 
-  const fundingBlock = await checkFunding(client, proposed)
+  const fundingBlock = await checkFunding(client, proposed, executionEnabled)
   if (fundingBlock) {
     return { action: 'blocked', ...fundingBlock, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
   }

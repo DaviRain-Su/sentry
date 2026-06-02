@@ -116,6 +116,7 @@ export function buildFundingReadiness({
       holder_label: 'DeepBook BalanceManager',
       asset: 'DBUSDC',
       threshold: thresholds.DBUSDC.required,
+      observed: balances.DBUSDC,
       observed_balance: balances.DBUSDC,
       usable: bigintOrZero(balances.DBUSDC) >= bigintOrZero(thresholds.DBUSDC.required),
       source_of_truth: 'DeepBook BalanceManager read from Sui Testnet',
@@ -126,6 +127,7 @@ export function buildFundingReadiness({
       holder_label: 'DeepBook BalanceManager',
       asset: 'DEEP',
       threshold: thresholds.DEEP.required,
+      observed: balances.DEEP,
       observed_balance: balances.DEEP,
       usable: bigintOrZero(balances.DEEP) >= bigintOrZero(thresholds.DEEP.required),
       source_of_truth: 'DeepBook BalanceManager read from Sui Testnet',
@@ -136,12 +138,16 @@ export function buildFundingReadiness({
       holder_label: 'Agent gas address',
       asset: 'SUI_MIST',
       threshold: thresholds.SUI_MIST.required,
+      observed: balances.SUI_MIST,
       observed_balance: balances.SUI_MIST,
       usable: bigintOrZero(balances.SUI_MIST) >= bigintOrZero(thresholds.SUI_MIST.required),
       source_of_truth: 'Agent wallet gas balance from Sui Testnet',
       blocker_code: 'INSUFFICIENT_GAS',
     },
   ]
+  for (const row of criteria) {
+    row.usability = row.usable ? 'usable' : 'blocked'
+  }
   const blockers = []
   if (!executionEnabled) {
     blockers.push({ code: 'EXECUTION_DISABLED', label: 'Execution disabled', observed: 'false', required: 'true' })

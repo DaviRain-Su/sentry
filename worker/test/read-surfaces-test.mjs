@@ -58,6 +58,13 @@ assert.equal(
   assert.equal(readiness.balances.DEEP, '0')
   assert.equal(readiness.balances.SUI_MIST, '123')
   assert.equal(readiness.criteria.length, 3)
+  for (const row of readiness.criteria) {
+    assert.ok(row.holder, `${row.asset} readiness row identifies holder`)
+    assert.ok(row.asset, `${row.asset} readiness row identifies asset`)
+    assert.ok(row.threshold, `${row.asset} readiness row identifies threshold`)
+    assert.equal(row.observed, row.observed_balance, `${row.asset} readiness row exposes observed balance`)
+    assert.equal(row.usability, row.usable ? 'usable' : 'blocked', `${row.asset} readiness row exposes usability`)
+  }
   assert.equal(readiness.funding_ready, false)
   assert.equal(readiness.execution_claimed, false)
 }
