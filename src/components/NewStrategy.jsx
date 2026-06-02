@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { useCurrentAccount } from '@mysten/dapp-kit'
 import { RG } from '../data.js'
 import { Icon, Sparkline } from './primitives.jsx'
+import { Slider } from '@heroui/react'
 import { WORKER_CONFIGURED, parseIntent as parseWorkerIntent, getSuiPriceHistory } from '../api.js'
 import { parseIntent as parseLocalIntent } from '../../core/strategy.js'
 import { runBacktest } from '../../core/backtest.js'
@@ -333,7 +334,9 @@ export function NewStrategy({ onDone, mode, setMode }) {
                 <label style={{ fontSize: 13, fontWeight: 600 }}>Budget ceiling</label>
                 <span className="mono" style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>{budget} USDC</span>
               </div>
-              <input type="range" min="100" max="2000" step="50" value={budget} onChange={e => setBudget(+e.target.value)} className="rg-slider" />
+              <Slider value={budget} onChange={setBudget} minValue={100} maxValue={2000} step={50} className="w-full">
+                <Slider.Track><Slider.Fill className="bg-accent" /><Slider.Thumb /></Slider.Track>
+              </Slider>
               <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 6 }}>Hard cap on total spend. The agent self-checks remaining budget before every order.</div>
             </div>
 
@@ -343,14 +346,18 @@ export function NewStrategy({ onDone, mode, setMode }) {
                   <label style={{ fontSize: 13, fontWeight: 600 }}>Max slippage</label>
                   <span className="mono" style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>{slip.toFixed(1)}%</span>
                 </div>
-                <input type="range" min="0.2" max="3" step="0.1" value={slip} onChange={e => setSlip(+e.target.value)} className="rg-slider" />
+                <Slider value={slip} onChange={setSlip} minValue={0.2} maxValue={3} step={0.1} className="w-full">
+                  <Slider.Track><Slider.Fill className="bg-accent" /><Slider.Thumb /></Slider.Track>
+                </Slider>
               </div>
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                   <label style={{ fontSize: 13, fontWeight: 600 }}>Expires in</label>
                   <span className="mono" style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>{expiry} days</span>
                 </div>
-                <input type="range" min="1" max="30" step="1" value={expiry} onChange={e => setExpiry(+e.target.value)} className="rg-slider" />
+                <Slider value={expiry} onChange={setExpiry} minValue={1} maxValue={30} step={1} className="w-full">
+                  <Slider.Track><Slider.Fill className="bg-accent" /><Slider.Thumb /></Slider.Track>
+                </Slider>
               </div>
             </div>
 
