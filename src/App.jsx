@@ -363,7 +363,8 @@ export default function App({ onExit }) {
     }
     const np = { id: '0x' + Math.random().toString(16).slice(2, 6) + '…' + Math.random().toString(16).slice(2, 6),
       name: meta.name, strategy: meta.strategy, status: 'active', mode, budgetCap: meta.budget, budgetUsed: 0,
-      scope: [meta.scope], maxSlippage: meta.slip, expires: '2026-06-14T00:00:00Z', created: '2026-06-01', execs: 0 }
+      scope: [meta.scope], maxSlippage: meta.slip, expires: '2026-06-14T00:00:00Z', created: '2026-06-01', execs: 0,
+      requireApproval: !!meta.requireApproval, leverage: meta.leverage || null, legs: meta.legs || null }
     setPolicies(ps => [np, ...ps])
     setActivity(a => [{ t: '14:28:40', date: 'Today', kind: 'policy', policy: np.name, title: 'Policy Object created', detail: `Budget ${meta.budget} USDC · scope ${meta.scope} · ${mode} mode · expires Jun 14`, amount: 0, tx: '0x' + Math.random().toString(16).slice(2,6) + '…' + Math.random().toString(16).slice(2,6), risk: null, mode }, ...a])
     showToast('Policy deployed — agent is now autonomous within limits', 'var(--accent)')
@@ -437,7 +438,7 @@ export default function App({ onExit }) {
               <NavItem icon="globe" label="Data sources" active={view === 'data'} onClick={() => setView('data')} />
               <NavItem icon="wallet" label="Profile & wallet" active={view === 'profile'} onClick={() => setView('profile')} />
             </div>
-            <Button className="mt-[18px] bg-accent text-accent-foreground font-semibold" fullWidth onPress={() => setView('new')}
+            <Button className="mt-[18px] bg-accent text-accent-foreground font-semibold" fullWidth onPress={() => { setSeed(null); setView('new') }}
               startContent={<Icon name="plus" size={16} stroke={2.4} />}>
               <span className="rg-navlabel">New strategy</span>
             </Button>
@@ -636,7 +637,7 @@ export default function App({ onExit }) {
               </div>
             )}
             {view === 'dashboard' && <Dashboard state={state} live={liveReadsEnabled ? { summary: liveSummary, market: liveMarket, activity: liveActivity } : null} />}
-            {view === 'new' && <NewStrategy mode={mode} setMode={setMode} onDone={deployPolicy} />}
+            {view === 'new' && <NewStrategy mode={mode} setMode={setMode} onDone={deployPolicy} seed={seed} />}
             {view === 'activity' && <ActivityView activity={shownActivity} onTx={setTxView} live={liveReadsEnabled} loading={liveReadsEnabled && liveLoading} />}
             {view === 'markets' && <MarketsView onDeploy={(s) => { setSeed(s); setView('new') }} live={liveFeed} onToast={showToast} />}
             {view === 'risk' && <RiskCenter policies={policies} stopped={halted} onEmergencyStop={emergencyStop} onToast={showToast} />}

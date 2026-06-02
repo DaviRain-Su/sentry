@@ -1,10 +1,10 @@
 /* ===========================================================
    RescueGrid — New Strategy flow (intent → policy)
    =========================================================== */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useCurrentAccount } from '@mysten/dapp-kit'
 import { RG } from '../data.js'
-import { Icon, Sparkline } from './primitives.jsx'
+import { Icon, Sparkline, fmtUsd } from './primitives.jsx'
 import { Slider, Button } from '@heroui/react'
 import { WORKER_CONFIGURED, parseIntent as parseWorkerIntent, getSuiPriceHistory } from '../api.js'
 import { parseIntent as parseLocalIntent } from '../../core/strategy.js'
@@ -56,14 +56,112 @@ function GuardianRow({ g }) {
   )
 }
 
-export function NewStrategy({ onDone, mode, setMode }) {
-  const [step, setStep] = useState(0)
-  const [text, setText] = useState('')
+/* visual multi-leg builder — add/remove legs, live net-delta, liquidation preview */
+const VENUE_OPTS = {
+  'funding-arb': ['Bluefin', 'Hyperliquid', 'Aevo', 'Binance', 'Bybit', 'Drift'],
+  spot: ['Binance', 'OKX', 'Bybit', 'Cetus', 'DeepBook', 'Raydium', 'Uniswap'],
+}
+const MARK_PX = { 'funding-arb': 4.182, spot: 4.182 }
+
+function LegBuilder({ scenario, budget, leverage, legs, setLegs }) {
+  const venues = VENUE_OPTS[scenario] || VENUE_OPTS['funding-arb']
+  const isSpot = scenario === 'spot'
+  const longWord = isSpot ? 'Buy' : 'Long', shortWord = isSpot ? 'Sell' : 'Short'
+  const mark = MARK_PX[scenario] || 4.182
+
+  const sumLong = legs.filter(l => l.side === 'long').reduce((s, l) => s + l.pct, 0)
+  const sumShort = legs.filter(l => l.side === 'short').reduce((s, l) => s + l.pct, 0)
+  const net = sumLong - sumShort
+  const neutral = Math.abs(net) <= 5
+  const lev = (scenario === 'funding-arb') ? leverage : 1
+
+  const setLeg = (i, patch) => setLegs(legs.map((l, j) => j === i ? { ...l, ...patch } : l))
+  const addLeg = () => { if (legs.length < 4) setLegs([...legs, { venue: venues.find(v => !legs.some(l => l.venue === v)) || venues[0], side: 'short', pct: 50 }]) }
+  const removeLeg = (i) => { if (legs.length > 1) setLegs(legs.filter((_, j) => j !== i)) }
+
+  const sideC = (s) => s === 'long' ? 'var(--safe)' : 'var(--danger)'
+  const off = Math.max(-46, Math.min(46, net / 100 * 46))
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Position legs</span>
+        <button onClick={addLeg} disabled={legs.length >= 4} className="btn btn-sm"
+          style={{ padding: '5px 10px', opacity: legs.length >= 4 ? .5 : 1 }}><Icon name="plus" size={12} /> Add leg</button>
+      </div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {legs.map((l, i) => {
+          const notional = budget * l.pct / 100 * lev
+          const liqPx = lev > 1 ? (l.side === 'long' ? mark * (1 - 1 / lev * 0.9) : mark * (1 + 1 / lev * 0.9)) : null
+          return (
+            <div key={i} style={{ flex: '1 1 200px', minWidth: 200, padding: 13, borderRadius: 'var(--r-md)',
+              background: 'var(--glass)', border: `1.5px solid ${sideC(l.side)}55` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 }}>
+                <span className="mono" style={{ fontSize: 9.5, color: 'var(--t2)' }}>LEG {i + 1}</span>
+                {legs.length > 1 && <button onClick={() => removeLeg(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t2)', padding: 2 }}><Icon name="x" size={13} /></button>}
+              </div>
+              <div style={{ display: 'flex', gap: 4, background: 'var(--bg-0)', borderRadius: 'var(--r-sm)', padding: 3, marginBottom: 9 }}>
+                {[['long', longWord], ['short', shortWord]].map(([s, lbl]) => (
+                  <button key={s} onClick={() => setLeg(i, { side: s })} style={{ flex: 1, padding: '5px 0', borderRadius: 5, border: 'none', cursor: 'pointer',
+                    fontFamily: 'var(--f-body)', fontSize: 11, fontWeight: 700, background: l.side === s ? `color-mix(in srgb, ${sideC(s)} 18%, transparent)` : 'transparent',
+                    color: l.side === s ? sideC(s) : 'var(--t2)' }}>{lbl}</button>
+                ))}
+              </div>
+              <select value={l.venue} onChange={e => setLeg(i, { venue: e.target.value })}
+                style={{ width: '100%', padding: '7px 9px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)', background: 'var(--bg-0)',
+                  color: 'var(--t0)', fontFamily: 'var(--f-body)', fontSize: 12, fontWeight: 600, marginBottom: 9, cursor: 'pointer' }}>
+                {venues.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--t2)' }}>Size</span>
+                <span className="mono" style={{ fontSize: 11, fontWeight: 600 }}>{l.pct}% · ${fmtUsd(notional, 0)}</span>
+              </div>
+              <input type="range" min="10" max="100" step="5" value={l.pct} onChange={e => setLeg(i, { pct: +e.target.value })} className="rg-slider" />
+              {liqPx && <div className="mono" style={{ fontSize: 9.5, color: 'var(--warn)', marginTop: 7 }}>liq ≈ ${liqPx.toFixed(3)} · {lev}× </div>}
+            </div>
+          )
+        })}
+      </div>
+      <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 'var(--r-md)', background: 'var(--glass)', border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 9 }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>Net exposure</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: neutral ? 'var(--safe)' : 'var(--warn)' }}>{neutral ? 'market-neutral' : (net > 0 ? 'net long ' : 'net short ') + Math.abs(net) + '%'}</span>
+        </div>
+        <div style={{ position: 'relative', height: 8, background: 'var(--bg-0)', borderRadius: 100 }}>
+          <div style={{ position: 'absolute', left: '50%', top: -3, width: 1, height: 14, background: 'var(--border-hi)' }} />
+          <div style={{ position: 'absolute', left: `calc(50% + ${off}px)`, top: '50%', transform: 'translate(-50%,-50%)', width: 14, height: 14, borderRadius: '50%',
+            background: neutral ? 'var(--safe)' : 'var(--warn)', boxShadow: `0 0 8px ${neutral ? 'var(--safe)' : 'var(--warn)'}`, transition: 'left .2s' }} />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 7 }}>
+          <span className="mono" style={{ fontSize: 9.5, color: 'var(--t3)' }}>{shortWord} ${fmtUsd(budget * sumShort / 100, 0)}</span>
+          <span className="mono" style={{ fontSize: 9.5, color: 'var(--t3)' }}>{longWord} ${fmtUsd(budget * sumLong / 100, 0)}</span>
+        </div>
+        {!neutral && <div style={{ fontSize: 10.5, color: 'var(--warn)', marginTop: 8, display: 'flex', gap: 6 }}>
+          <Icon name="alert" size={12} style={{ flexShrink: 0, marginTop: 1 }} />Legs are unbalanced — this strategy carries directional risk. Match {longWord.toLowerCase()} and {shortWord.toLowerCase()} sizes for neutrality.</div>}
+      </div>
+    </div>
+  )
+}
+
+export function NewStrategy({ onDone, mode, setMode, seed }) {
+  const PARSED = { safe: RG.parsed, dca: RG.parsedDCA, hedge: RG.parsedHedge, risky: RG.parsedRisky,
+    'funding-arb': RG.parsedFundingArb, lp: RG.parsedLP, lend: RG.parsedLendYield, spot: RG.parsedSpotArb }
+  // a market/catalog "Deploy" seeds the wizard: jump to Review with the scenario pre-filled
+  const seeded = seed && PARSED[seed.scenario] ? seed.scenario : null
+  const seedMeta = seeded ? PARSED[seeded].meta : null
+  const [step, setStep] = useState(seeded ? 1 : 0)
+  const [text, setText] = useState((seed && seed.text) || '')
   const [parsing, setParsing] = useState(false)
-  const [scenario, setScenario] = useState('safe')
-  const [budget, setBudget] = useState(500)
-  const [slip, setSlip] = useState(1.2)
+  const [scenario, setScenario] = useState(seeded || 'safe')
+  const [budget, setBudget] = useState(seedMeta ? seedMeta.budget : 500)
+  const [slip, setSlip] = useState(seedMeta ? seedMeta.slip : 1.2)
   const [expiry, setExpiry] = useState(14)
+  // Builder v2 — advanced, strategy-aware controls
+  const [leverage, setLeverage] = useState(2)
+  const [liqBuffer, setLiqBuffer] = useState(25)
+  const [flipThresh, setFlipThresh] = useState(0)
+  const [requireApproval, setRequireApproval] = useState(false)
+  const [legs, setLegs] = useState([{ venue: 'Bluefin', side: 'short', pct: 50 }, { venue: 'Hyperliquid', side: 'long', pct: 50 }])
   const [livePreview, setLivePreview] = useState(null)
   const [livePreviewSource, setLivePreviewSource] = useState(null)
   const [liveBacktest, setLiveBacktest] = useState(null)
@@ -73,16 +171,32 @@ export function NewStrategy({ onDone, mode, setMode }) {
   const readOnlyPreview = !account && workerPreview
   const previewOwner = account?.address || deployment.agent.address
   const steps = ['Intent', 'Review', 'Policy', 'Deploy']
-  const PARSED = { safe: RG.parsed, dca: RG.parsedDCA, hedge: RG.parsedHedge, risky: RG.parsedRisky }
   const P = PARSED[scenario]
   const meta = P.meta || RG.parsed.meta
+  // which advanced (builder v2) controls apply to this strategy
+  const adv = {
+    leverage: ['funding-arb', 'hedge'].includes(scenario),
+    twoLeg: ['funding-arb', 'spot'].includes(scenario),
+    flip: scenario === 'funding-arb',
+    ltv: scenario === 'lend',
+  }
   const blocked = P.guardian.some(g => g.level === 'fail')
   const failCount = P.guardian.filter(g => g.level === 'fail').length
   const BT = (live && liveBacktest) ? liveBacktest : P.backtest
   const btLive = !!(live && liveBacktest)
 
+  // seed leg-builder defaults per scenario
+  useEffect(() => {
+    if (scenario === 'spot') setLegs([{ venue: 'OKX', side: 'long', pct: 50 }, { venue: 'Raydium', side: 'short', pct: 50 }])
+    else if (scenario === 'funding-arb') setLegs([{ venue: 'Aevo', side: 'short', pct: 50 }, { venue: 'Hyperliquid', side: 'long', pct: 50 }])
+  }, [scenario])
+
   const classify = (s) => {
     if (/entire|all-?in|ignore slippage|everything|max leverage|20x/i.test(s)) return 'risky'
+    if (/spot arb|cross-?venue|cross-?exchange/i.test(s)) return 'spot'
+    if (/funding|arb|arbitrage|perp|delta-?neutral|basis/i.test(s)) return 'funding-arb'
+    if (/\blp\b|liquidity|concentrated|re-?center|pool range/i.test(s)) return 'lp'
+    if (/stablecoin|idle|yield router|lend|lending|supply|money market|best (rate|yield)/i.test(s)) return 'lend'
     if (/dca|every day|each day|accumulate|tranche|ladder|daily/i.test(s)) return 'dca'
     if (/hedge|falls below|drops below|downside|protect|short/i.test(s)) return 'hedge'
     return 'safe'
@@ -362,9 +476,9 @@ export function NewStrategy({ onDone, mode, setMode }) {
             </div>
 
             <div>
-              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Allowed Deepbook venues</label>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 8 }}>Allowed markets &amp; venues</label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {['SUI/USDC', 'DEEP/USDC', 'WAL/USDC'].map((v) => {
+                {Array.from(new Set([meta.scope, 'SUI/USDC', 'DEEP/USDC', 'WAL/USDC'])).map((v) => {
                   const on = v === meta.scope
                   return (
                     <div key={v} className={`badge ${on ? 'badge-accent' : 'badge-neutral'}`} style={{ padding: '8px 12px', fontSize: 12 }}>
@@ -373,7 +487,80 @@ export function NewStrategy({ onDone, mode, setMode }) {
                   )
                 })}
               </div>
-              <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 8 }}>Scope locks the agent to these pools only. Anything else is rejected on-chain.</div>
+              <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 8 }}>Scope locks the agent to these markets only. Anything else is rejected on-chain.</div>
+            </div>
+
+            {/* Builder v2 — advanced, strategy-aware controls */}
+            {(adv.leverage || adv.ltv || adv.flip || adv.twoLeg) && (
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <span style={{ color: 'var(--accent)' }}><Icon name="settings" size={15} /></span>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Advanced limits</span>
+                  <span className="badge badge-neutral" style={{ fontSize: 9 }}>{meta.strategy}</span>
+                </div>
+                {adv.twoLeg && (
+                  <div style={{ marginBottom: 18 }}>
+                    <LegBuilder scenario={scenario} budget={budget} leverage={leverage} legs={legs} setLegs={setLegs} />
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                  {adv.leverage && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <label style={{ fontSize: 13, fontWeight: 600 }}>Max leverage</label>
+                        <span className="mono" style={{ fontSize: 14, color: leverage > 4 ? 'var(--warn)' : 'var(--accent)', fontWeight: 600 }}>{leverage.toFixed(1)}×</span>
+                      </div>
+                      <input type="range" min="1" max="8" step="0.5" value={leverage} onChange={e => setLeverage(+e.target.value)} className="rg-slider" />
+                      <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 6 }}>Caps notional per leg. Higher leverage tightens the liquidation buffer.</div>
+                    </div>
+                  )}
+                  {adv.leverage && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <label style={{ fontSize: 13, fontWeight: 600 }}>Min liquidation buffer</label>
+                        <span className="mono" style={{ fontSize: 14, color: liqBuffer < 15 ? 'var(--danger)' : 'var(--accent)', fontWeight: 600 }}>{liqBuffer}%</span>
+                      </div>
+                      <input type="range" min="5" max="50" step="1" value={liqBuffer} onChange={e => setLiqBuffer(+e.target.value)} className="rg-slider" />
+                      <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 6 }}>Agent deleverages a leg before its margin gets this close to liquidation.</div>
+                    </div>
+                  )}
+                  {adv.ltv && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <label style={{ fontSize: 13, fontWeight: 600 }}>Max LTV</label>
+                        <span className="mono" style={{ fontSize: 14, color: liqBuffer > 70 ? 'var(--warn)' : 'var(--accent)', fontWeight: 600 }}>{liqBuffer}%</span>
+                      </div>
+                      <input type="range" min="20" max="85" step="1" value={liqBuffer} onChange={e => setLiqBuffer(+e.target.value)} className="rg-slider" />
+                      <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 6 }}>Loan-to-value ceiling if the optimizer ever borrows to loop. Supply-only by default.</div>
+                    </div>
+                  )}
+                  {adv.flip && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <label style={{ fontSize: 13, fontWeight: 600 }}>Unwind if net carry below</label>
+                        <span className="mono" style={{ fontSize: 14, color: 'var(--accent)', fontWeight: 600 }}>{flipThresh > 0 ? '+' : ''}{flipThresh}% APR</span>
+                      </div>
+                      <input type="range" min="-5" max="8" step="0.5" value={flipThresh} onChange={e => setFlipThresh(+e.target.value)} className="rg-slider" />
+                      <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 6 }}>Funding-flip guard — closes both legs if the spread decays past this floor.</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Manual approval toggle — every strategy */}
+            <div onClick={() => setRequireApproval(v => !v)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 13,
+              padding: '14px 16px', borderRadius: 'var(--r-md)', border: `1.5px solid ${requireApproval ? 'var(--accent)' : 'var(--border)'}`,
+              background: requireApproval ? 'var(--accent-dim)' : 'var(--glass)', transition: 'all .15s' }}>
+              <div style={{ width: 40, height: 24, borderRadius: 100, flexShrink: 0, padding: 3, background: requireApproval ? 'var(--accent)' : 'var(--bg-0)', transition: 'background .15s' }}>
+                <div style={{ width: 18, height: 18, borderRadius: '50%', background: requireApproval ? '#06231f' : 'var(--t2)', transform: requireApproval ? 'translateX(16px)' : 'none', transition: 'transform .15s' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Require my approval before each execution</div>
+                <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 2 }}>
+                  {requireApproval ? 'Agent stages every order and waits for your sign-off — fully supervised.' : 'Agent executes autonomously within these limits — set-and-forget.'}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -420,15 +607,17 @@ export function NewStrategy({ onDone, mode, setMode }) {
 
           <div className="card" style={{ padding: '18px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 10, background: 'var(--sui-dim)', color: 'var(--sui)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="link" size={18} />
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: requireApproval ? 'var(--warn-dim)' : 'var(--sui-dim)', color: requireApproval ? 'var(--warn)' : 'var(--sui)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name={requireApproval ? 'eye' : 'link'} size={18} />
               </div>
               <div>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{readOnlyPreview ? 'Read-only Worker preview' : 'One signature creates the Policy Object'}</div>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{readOnlyPreview ? 'Read-only Worker preview' : requireApproval ? 'Supervised — you approve each execution' : 'One signature creates the Policy Object'}</div>
                 <div style={{ fontSize: 12, color: 'var(--t2)' }}>
                   {readOnlyPreview
                     ? 'The parsed intent, PTB preview and Guardian output came from the live Worker. Connect a Sui wallet only when you want to sign and deploy.'
-                    : 'After this, the agent acts autonomously within limits — no more signing.'}
+                    : requireApproval
+                      ? 'The agent stages orders; nothing executes without your sign-off.'
+                      : 'After this, the agent acts autonomously within limits — no more signing.'}
                 </div>
               </div>
             </div>
@@ -436,7 +625,7 @@ export function NewStrategy({ onDone, mode, setMode }) {
 
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <Button className="rg-btn-2" onPress={() => setStep(2)} startContent={<Icon name="chevL" size={15} />}>Back</Button>
-            <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => onDone(meta, text)}><Icon name="shield" size={15} /> {readOnlyPreview ? 'Preview only · connect wallet' : 'Sign & deploy policy'}</Button>
+            <Button className="bg-accent text-accent-foreground font-semibold" onPress={() => onDone({ ...meta, budget, slip, expiry, leverage: adv.leverage ? leverage : null, liqBuffer: (adv.leverage || adv.ltv) ? liqBuffer : null, requireApproval, legs: adv.twoLeg ? legs : null }, text)}><Icon name="shield" size={15} /> {readOnlyPreview ? 'Preview only · connect wallet' : 'Sign & deploy policy'}</Button>
           </div>
         </div>
       )}
