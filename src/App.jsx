@@ -2,6 +2,7 @@
    RescueGrid — app shell, navigation, crash orchestration
    =========================================================== */
 import { useState, useEffect, useRef } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCurrentAccount, useCurrentWallet, useSuiClient, useSignAndExecuteTransaction, useDisconnectWallet } from '@mysten/dapp-kit'
 import { Transaction } from '@mysten/sui/transactions'
 import { RG } from './data.js'
@@ -12,12 +13,8 @@ import {
   buildPolicyTx,
   activatePolicy,
   buildRevokeTx,
-  listPolicies,
-  listActivity,
-  getSummary,
-  getMarket,
-  getBalances,
 } from './api.js'
+import { EMPTY_LIVE_DASHBOARD, liveDashboardOwnerKey, useLiveDashboard } from './queries/live.js'
 import { Icon, Logo, Token, hexToRgba } from './components/primitives.jsx'
 import { ZkLogin } from './components/ZkLogin.jsx'
 import { Dashboard } from './components/Dashboard.jsx'
@@ -63,6 +60,11 @@ function NavItem({ icon, label, active, onClick, badge }) {
   )
 }
 
+function apiFailure(label, result) {
+  const message = result?.message || result?.code || 'unknown error'
+  return new Error(`${label}: ${message}`)
+}
+
 export default function App({ onExit }) {
   const [authed, setAuthed] = useState(false)
   const [sessionMode, setSessionMode] = useState('signed-out')
@@ -99,6 +101,7 @@ export default function App({ onExit }) {
   const suiClient = useSuiClient()
   const { mutateAsync: signAndExec } = useSignAndExecuteTransaction()
   const { mutate: disconnect } = useDisconnectWallet()
+  const queryClient = useQueryClient()
   const liveMode = sessionMode === 'wallet' && !!account
   const readOnlyLiveMode = sessionMode === 'readonly' && WORKER_CONFIGURED
   const liveReadsEnabled = liveMode || readOnlyLiveMode
@@ -108,6 +111,22 @@ export default function App({ onExit }) {
     : readOnlyLiveMode
       ? `agent ${owner.slice(0, 6)}…${owner.slice(-4)}`
       : RG.user.handle
+  const liveDashboardQuery = useLiveDashboard({
+    owner,
+    mode,
+    enabled: liveReadsEnabled && authed,
+  })
+  const liveDashboard = liveDashboardQuery.data || EMPTY_LIVE_DASHBOARD
+  const liveActivity = liveDashboard.activity
+  const liveSummary = liveDashboard.summary
+  const liveMarket = liveDashboard.market
+  const liveHoldings = liveDashboard.holdings
+  const liveFunding = liveDashboard.funding
+  const liveLoading = liveReadsEnabled && liveDashboardQuery.isPending
+  const liveReadMeta = liveDashboardQuery.isError
+    ? { source: 'error', error: String(liveDashboardQuery.error?.message || liveDashboardQuery.error) }
+    : liveDashboard.meta
+  const refreshLivePolicies = () => queryClient.invalidateQueries({ queryKey: liveDashboardOwnerKey(owner) })
 
   // apply accent + theme to CSS vars
   useEffect(() => {
@@ -209,80 +228,61 @@ export default function App({ onExit }) {
     setActivity(RG.activity); setPolicies(RG.policies)
   }
 
-  // Live policies (D4): load the owner's on-chain policies from PolicyCreated events,
-  // enriched with the real current spend/status from the summary.
-  const mapLivePolicy = (p, spentUnits = 0, status = 'active') => ({
-    id: p.wrapper_id.slice(0, 6) + '…' + p.wrapper_id.slice(-4),
-    _wrapperId: p.wrapper_id, _mandateId: p.mandate_id,
-    name: 'SUI Crash Rescue Grid', strategy: 'rescue-grid', status: ['active', 'revoked', 'expired', 'paused'].includes(status) ? status : 'paused', mode,
-    budgetCap: Number(p.budget_ceiling) / 1e6, budgetUsed: Number(spentUnits) / 1e6,
-    scope: ['SUI/USDC'], maxSlippage: p.max_slippage_bps / 100,
-    expires: new Date(Number(p.expires_at_ms)).toISOString(), created: '2026-06-02', execs: 0,
-    owner: p.owner,
+  useEffect(() => {
+    if (!liveReadsEnabled || !authed) return
+    if (liveDashboardQuery.data) setPolicies(liveDashboardQuery.data.policies)
+    else if (liveDashboardQuery.isError) setPolicies([])
+  }, [liveReadsEnabled, authed, liveDashboardQuery.data, liveDashboardQuery.isError])
+
+  const revokeLiveMutation = useMutation({
+    mutationFn: async ({ id }) => {
+      const pol = policies.find(p => p.id === id)
+      const wid = pol?._wrapperId || id
+      const built = await buildRevokeTx(owner, wid)
+      if (built.status !== 'ok') throw apiFailure('Revoke build failed', built)
+      await signAndExec({ transaction: Transaction.from(built.tx_json) })
+      return { wrapperId: wid }
+    },
+    onSuccess: () => {
+      showToast('Policy revoked on-chain — agent authority deleted', 'var(--danger)')
+      pushNotif('policy', 'Policy revoked on-chain')
+      queryClient.invalidateQueries({ queryKey: liveDashboardOwnerKey(owner) })
+      setTimeout(() => refreshLivePolicies(), 1500)
+    },
+    onError: (e) => {
+      showToast(`Revoke failed: ${String(e?.message || e).slice(0, 80)}`, 'var(--danger)')
+    },
   })
-  const [liveActivity, setLiveActivity] = useState([])
-  const [liveSummary, setLiveSummary] = useState(null)
-  const [liveMarket, setLiveMarket] = useState(null)
-  const [liveHoldings, setLiveHoldings] = useState([])
-  const [liveFunding, setLiveFunding] = useState(null)
-  const [liveLoading, setLiveLoading] = useState(false)
-  const [liveReadMeta, setLiveReadMeta] = useState({ source: null, error: null })
-  const refreshLivePolicies = async () => {
-    if (!liveReadsEnabled) return
-    setLiveLoading(true)
-    try {
-      const [pr, ar, sr, mr, br] = await Promise.all([listPolicies(owner), listActivity(owner), getSummary(owner), getMarket(), getBalances(owner)])
-      const results = [pr, ar, sr, mr, br]
-      const fallback = results.find(r => r?.source === 'chain_fallback')
-      const worker = results.find(r => r?.source === 'worker')
-      setLiveReadMeta({ source: fallback ? 'chain_fallback' : worker ? 'worker' : null, error: fallback?.worker_error || null })
-      if (sr.status === 'ok') setLiveSummary(sr.summary)
-      else setLiveSummary({ active_policies: 0, total_policies: 0, total_authorized: 0, total_deployed: 0, positions: [] })
-      if (pr.status === 'ok') {
-        // enrich each policy with real spend + chain-derived status; do not hide revoked/terminal policies.
-        const pos = {}
-        if (sr.status === 'ok') sr.summary.positions.forEach(po => { pos[po.wrapper_id] = po })
-        const live = pr.policies
-          .map(p => mapLivePolicy(p, pos[p.wrapper_id]?.spent_amount ?? 0, pos[p.wrapper_id]?.status ?? 'active'))
-        setPolicies(live)
-      } else setPolicies([])
-      if (ar.status === 'ok') setLiveActivity(ar.activity)
-      else setLiveActivity([])
-      if (mr.status === 'ok') setLiveMarket(mr.market)
-      if (br.status === 'ok') {
-        setLiveHoldings(br.holdings)
-        setLiveFunding(br.funding || null)
-      } else {
-        setLiveHoldings([])
-        setLiveFunding(null)
-      }
-    } catch (e) {
-      setPolicies([])
-      setLiveActivity([])
-      setLiveHoldings([])
-      setLiveFunding(null)
-      setLiveSummary({ active_policies: 0, total_policies: 0, total_authorized: 0, total_deployed: 0, positions: [] })
-      setLiveReadMeta({ source: 'error', error: String(e?.message || e) })
-    }
-    finally { setLiveLoading(false) }
-  }
-  useEffect(() => { if (liveReadsEnabled && authed) refreshLivePolicies() }, [liveReadsEnabled, authed, owner])
+
+  const deployLiveMutation = useMutation({
+    mutationFn: async ({ text, meta }) => {
+      const parsed = await parseIntent(owner, text || `When SUI drops more than 8%, deploy a ${meta.budget} USDC rescue grid`)
+      if (parsed.status !== 'ok') throw apiFailure('Parse failed', parsed)
+      const built = await buildPolicyTx(owner, parsed.strategy, parsed.strategy_hash)
+      if (built.status !== 'ok') throw apiFailure('Build failed', built)
+      const signed = await signAndExec({ transaction: Transaction.from(built.tx_json) })
+      const res = await suiClient.waitForTransaction({ digest: signed.digest, options: { showObjectChanges: true, showEvents: true } })
+      const ev = (res.events || []).find(e => String(e.type).endsWith('::policy::PolicyCreated'))
+      const wrapperId = ev?.parsedJson?.wrapper_id
+      if (wrapperId) await activatePolicy(wrapperId).catch(() => {})
+      return { meta, wrapperId, digest: signed.digest }
+    },
+    onSuccess: ({ meta }) => {
+      showToast('Policy created on-chain — agent authorized within limits', 'var(--accent)')
+      pushNotif('policy', `Policy deployed on-chain · ${meta.name}`)
+      setView('policies')
+      queryClient.invalidateQueries({ queryKey: liveDashboardOwnerKey(owner) })
+      setTimeout(() => refreshLivePolicies(), 1500)
+    },
+    onError: (e) => {
+      showToast(`On-chain deploy failed: ${String(e?.message || e).slice(0, 80)}`, 'var(--danger)')
+    },
+  })
 
   const handleRevoke = async (id) => {
     if (liveMode) {
       if (!WORKER_CONFIGURED) { showToast('Revoke needs the Worker — set VITE_WORKER_URL and run it', 'var(--warn)'); return }
-      const pol = policies.find(p => p.id === id)
-      const wid = pol?._wrapperId || id
-      try {
-        const built = await buildRevokeTx(owner, wid)
-        if (built.status !== 'ok') { showToast(`Revoke build failed: ${built.message || built.code}`, 'var(--danger)'); return }
-        await signAndExec({ transaction: Transaction.from(built.tx_json) })
-        showToast('Policy revoked on-chain — agent authority deleted', 'var(--danger)')
-        pushNotif('policy', 'Policy revoked on-chain')
-        setTimeout(() => refreshLivePolicies(), 1500)
-      } catch (e) {
-        showToast(`Revoke failed: ${String(e?.message || e).slice(0, 80)}`, 'var(--danger)')
-      }
+      revokeLiveMutation.mutate({ id })
       return
     }
     if (readOnlyLiveMode) {
