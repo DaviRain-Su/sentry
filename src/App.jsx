@@ -27,6 +27,7 @@ import { Profile } from './components/Profile.jsx'
 import { PolicyInspect, TxDrawer } from './components/Detail.jsx'
 import { MarketsView } from './components/Markets.jsx'
 import { RiskCenter } from './components/Risk.jsx'
+import { StrategyMarketplace, StrategyDetail } from './components/Marketplace.jsx'
 import { AgentRuntimeDrawer } from './components/MarketDrawers.jsx'
 import { useTweaks, TweaksPanel, TweakSection, TweakColor, TweakRadio, TweakToggle } from './components/TweaksPanel.jsx'
 import { Button } from '@heroui/react'
@@ -61,6 +62,7 @@ export default function App({ onExit }) {
   const [inspect, setInspect] = useState(null)
   const [txView, setTxView] = useState(null)
   const [seed, setSeed] = useState(null)
+  const [stratId, setStratId] = useState(null)
   const [liveFeed, setLiveFeed] = useState(false)
   const [runtimeOpen, setRuntimeOpen] = useState(false)
   const [runtimeMode, setRuntimeMode] = useState(null)
@@ -374,6 +376,7 @@ export default function App({ onExit }) {
             <NavItem icon="dashboard" label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
             <NavItem icon="activity" label="Agent activity" active={view === 'activity'} onClick={() => setView('activity')} badge={shownActivity.length} />
             <NavItem icon="radar" label="Markets monitor" active={view === 'markets'} onClick={() => setView('markets')} />
+            <NavItem icon="grid" label="Strategy catalog" active={view === 'strategies' || view === 'strategy-detail'} onClick={() => setView('strategies')} />
             <NavItem icon="shield" label="Policies" active={view === 'policies'} onClick={() => setView('policies')} />
             <NavItem icon="alert" label="Risk center" active={view === 'risk'} onClick={() => setView('risk')} />
             <NavItem icon="wallet" label="Profile & wallet" active={view === 'profile'} onClick={() => setView('profile')} />
@@ -556,6 +559,8 @@ export default function App({ onExit }) {
             {view === 'activity' && <ActivityView activity={shownActivity} onTx={setTxView} live={liveReadsEnabled} loading={liveReadsEnabled && liveLoading} />}
             {view === 'markets' && <MarketsView onDeploy={(s) => { setSeed(s); setView('new') }} live={liveFeed} onToast={showToast} />}
             {view === 'risk' && <RiskCenter policies={policies} stopped={halted} onEmergencyStop={emergencyStop} onToast={showToast} />}
+            {view === 'strategies' && <StrategyMarketplace onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} onOpen={(id) => { setStratId(id); setView('strategy-detail') }} />}
+            {view === 'strategy-detail' && <StrategyDetail id={stratId} onBack={() => setView('strategies')} onDeploy={(s) => { setSeed(s); setView('new') }} onToast={showToast} />}
             {view === 'policies' && <PoliciesView policies={policies} onRevoke={handleRevoke} onInspect={setInspect} live={liveReadsEnabled} readOnly={readOnlyLiveMode} loading={liveReadsEnabled && liveLoading} />}
             {view === 'profile' && <Profile
               live={liveReadsEnabled}
