@@ -3,7 +3,19 @@
 状态：Draft
 日期：2026-06-01
 定位：Sentry：自主 DeFi 风险响应 Agent
-适用范围：Hackathon MVP technical contract
+适用范围：Sui Testnet Worker demo + Local Agent-first technical contract
+
+## 0. Agent Dispatch Architecture
+
+2026-06-03 起，Sentry 的生产架构改为 **Agent 调度平台**：
+
+- 守护程序（daemon）负责 Policy 管理、Tick 监控、Guardian 风控、Agent 调度。
+- 守护程序**不自行执行交易**。交易执行委托给外部 Agent（Claude Code、Codex、Kimi 等）。
+- 外部 Agent 使用本机已有的 OWS vault、Solana CLI、钱包、chain RPC 等工具链完成签名和执行。
+- Worker/Durable Object 仍是已验证的 Sui Testnet demo runtime，保留但不作为生产路径。
+- Worker Bridge 是可选 relay，用于 paired 守护程序的远程状态和 typed command。
+
+外部 Agent 调度协议详见 `docs/11-local-agent-worker-bridge.md` §5a。
 
 ## 1. Constants
 
@@ -14,7 +26,7 @@
 | `BPS_DENOMINATOR` | `10_000` | basis points denominator |
 | `DEFAULT_MAX_SLIPPAGE_BPS` | `100` | 1.00% default preview value |
 | `MAX_ALLOWED_SLIPPAGE_BPS` | `500` | 5.00% hard MVP ceiling |
-| `DEFAULT_TICK_INTERVAL_SECONDS` | `60` | Cloud Agent tick interval |
+| `DEFAULT_TICK_INTERVAL_SECONDS` | `60` | Local Agent / demo Worker tick interval |
 | `MAX_POLICY_LIFETIME_SECONDS` | `604800` | 7 days |
 | `MIN_POLICY_BUDGET` | implementation coin unit dependent | must be non-zero |
 | `SUPPORTED_CHAIN` | `sui:testnet` | MVP only |
@@ -25,6 +37,15 @@
 | `REVOKE_REASON_OWNER` | `1` | owner-requested revocation reason |
 | `MOVEGATE_DEFAULT_CREATION_FEE_MIST` | `10_000_000` | MoveGate source default, 0.01 SUI |
 | `INTERNAL_AGENT_TICK_HEADER` | `Authorization: Bearer <INTERNAL_AGENT_TICK_TOKEN>` | required for internal tick endpoint |
+| `DEFAULT_AGENT_MODE` | `local` | production default runtime |
+| `DEFAULT_OWS_VAULT_PATH` | `~/.ows` | local wallet vault |
+| `DEFAULT_SENTRY_HOME` | `~/.sentry` | local agent config, state and logs |
+| `BRIDGE_PROTOCOL_VERSION` | `1` | Local Agent bridge envelope version |
+| `PAIRING_CODE_TTL_SECONDS` | `300` | pairing code lifetime |
+| `AGENT_BRIDGE_HEARTBEAT_SECONDS` | `30` | daemon heartbeat upper bound |
+| `AGENT_BRIDGE_STALE_SECONDS` | `90` | mark remote session stale after missing heartbeat |
+| `REMOTE_COMMAND_TTL_SECONDS` | `120` | default command expiry |
+| `MAX_BRIDGE_COMMAND_QUEUE` | `100` | bounded queue per AgentSession DO |
 
 Enforcement notes:
 
@@ -33,9 +54,72 @@ Enforcement notes:
 - `MAX_ACTIVE_POLICIES_PER_DEPLOYMENT` is enforced only by Worker/API state. The Move package does not enforce a global deployment count, so direct chain calls can create more policies; this cap is an MVP operational limit, not a security invariant.
 - `EXECUTOR_KIND_DEEPBOOK` is part of the confirmed strategy hash. Future adapters must introduce explicit executor kinds and tests before they can be accepted.
 
-## 2. Deployment Agent
+## 2. Agent Identity and Signing
 
-MVP uses one team-controlled Testnet agent wallet per deployment.
+### Agent Dispatch Model
+
+Sentry 守护程序不自行签名或执行交易。签名和执行由外部 Agent 使用本机环境完成。
+
+守护程序的角色：
+- 构建 `AgentTask`（策略上下文 + 动作 + 约束）
+- 通过 subprocess/stdio 分发给外部 Agent
+- 接收 `AgentTaskResult`，验证并记录
+
+外部 Agent 的角色：
+- 接收结构化任务
+- 使用本机 OWS vault / Solana CLI / wallets 等环境构建并签名交易
+- 返回结构化结果
+
+```ts
+type AgentTask = {
+  task_id: string;
+  policy_id: string;
+  target_agent: string;
+  policy_context: { chain: string; venue: string; budget_remaining: string; spent_amount: string; max_slippage_bps: number; strategy_type: string; expires_at_ms: number };
+  action: { type: string; params: Record<string, unknown> };
+  constraints: { budget_cap: string; slippage_cap_bps: number; venue_scope: string[]; require_simulation: boolean; require_receipt: boolean };
+  issued_at_ms: number;
+  expires_at_ms: number;
+};
+
+type AgentTaskResult = {
+  task_id: string;
+  status: 'executed' | 'blocked' | 'failed' | 'needs_approval' | 'expired';
+  tx_digest?: string;
+  venue_order_id?: string;
+  evidence?: Record<string, unknown>;
+  reason?: string;
+  amount_spent?: string;
+  amount_received?: string;
+  executed_at_ms: number;
+};
+```
+
+### Legacy SignerRouter（Sui Testnet Worker demo）
+
+```ts
+type SignerRef =
+  | { kind: 'ows_wallet'; wallet_id: string; account_id: string; chain_id: string; token_ref: string }
+  | { kind: 'exchange_api_key'; venue_id: string; key_handle: string; permissions: string[] }
+  | { kind: 'manual_approval'; account_id: string; reason: string };
+
+interface SignerRouter {
+  resolve(policy: PolicySnapshot, plan: ExecutionPlan): Promise<SignerRef>;
+  signOrExecute(ref: SignerRef, plan: ExecutionPlan): Promise<ExecutionResult>;
+}
+```
+
+Rules:
+
+- `ows_wallet` signs chain transactions or messages through OWS local service / subprocess / binding.
+- OWS owner passphrase must not be passed through the browser.
+- `token_ref` is a local reference to an OWS `ows_key_...` token, not the raw token string in UI state.
+- `exchange_api_key` may only represent read + trade scopes. Withdrawal permission is a hard failure.
+- `manual_approval` is returned when a policy requires human approval or a planned action exceeds autonomous scope.
+
+### Sui Testnet Worker demo
+
+The existing MVP uses one team-controlled Testnet agent wallet per deployment.
 
 - The public address is configured as `SENTRY_AGENT_ADDRESS`.
 - The signing credential is stored as a Cloudflare secret or equivalent local dev secret, never in frontend code.
@@ -44,9 +128,203 @@ MVP uses one team-controlled Testnet agent wallet per deployment.
 - `/api/policies` must verify the submitted strategy agent equals `SENTRY_AGENT_ADDRESS`.
 - Agent key rotation affects only new policies. Existing policies name the old agent until owner revokes and recreates them.
 
-## 3. Composable Runtime Contract
+## 3. Local Secret Store and Inventory
 
-Runtime Core is shared by Cloud Agent and the future Local CLI daemon. It owns policy loading, adapter selection, Guardian evaluation and activity logging. Protocol-specific behavior lives behind ExecutorAdapter.
+### VenueAccount
+
+```ts
+type VenueAccount = {
+  id: string;
+  venue_kind: 'chain' | 'dex' | 'perps' | 'cex' | 'bridge';
+  venue_id: string;
+  custody_model: 'self_custody' | 'smart_account' | 'subaccount' | 'api_key' | 'vault';
+  authority_model: string;
+  owner_address?: string;
+  agent_address?: string;
+  account_ref?: string;
+  signer_ref?: SignerRef;
+  capabilities: string[];
+  status: 'active' | 'paused' | 'revoked' | 'expired' | 'needs_reauth';
+};
+```
+
+Rules:
+
+- CEX accounts must use subaccounts when available.
+- CEX API keys must be read + trade only.
+- `account_ref` may be a wrapper id, Safe address, subaccount id, API key handle or OWS wallet id.
+- `capabilities` must distinguish read, sign, submit tx, place order, cancel order, transfer and withdraw. Withdraw must be false by default and unsupported for autonomous strategies.
+
+### SecretStore
+
+```ts
+interface SecretStore {
+  putExchangeKey(input: ExchangeKeyImport): Promise<KeyHandle>;
+  getScopedCredential(handle: KeyHandle, purpose: 'read' | 'trade'): Promise<ScopedCredential>;
+  revoke(handle: KeyHandle): Promise<void>;
+  verifyPermissions(handle: KeyHandle): Promise<PermissionCheck>;
+}
+```
+
+Rules:
+
+- Raw exchange secret is stored in OS keychain / keyring.
+- `~/.sentry` stores metadata only: key handle, venue id, permission proof, subaccount id, IP allowlist status and rotation time.
+- Any key with withdrawal permission must be rejected.
+- Key use must be written to local activity log with request summary, not raw secret.
+
+### AssetPosition
+
+```ts
+type AssetPosition = {
+  venue_id: string;
+  account_ref: string;
+  asset_id: string;
+  symbol: string;
+  free: string;
+  locked: string;
+  borrowed?: string;
+  notional_usd: string;
+  source: 'ows' | 'chain_rpc' | 'cex_api' | 'perps_api' | 'manual';
+  observed_at: string;
+  stale_after_ms: number;
+};
+```
+
+Guardian must consume a bounded `InventorySnapshot` built from these positions. Adapters should not bypass InventoryStore for risk checks.
+
+## 4. Local Agent Bridge Protocol
+
+The Worker bridge is optional. It lets a paired browser session observe and request actions from a Local Agent daemon without opening an inbound port on the user's machine.
+
+### Pairing
+
+```ts
+type PairingRequest = {
+  owner_session_id: string;
+  device_label?: string;
+};
+
+type PairingChallenge = {
+  pairing_code: string;
+  expires_at: string;
+  relay_url: string;
+};
+
+type PairingSubmit = {
+  pairing_code: string;
+  agent_public_key: string;
+  device_name: string;
+  supported_capabilities: string[];
+  signed_nonce: string;
+};
+
+type PairingResult = {
+  agent_id: string;
+  session_id: string;
+  websocket_url: string;
+  relay_token: string;
+};
+```
+
+Rules:
+
+- pairing code TTL is `PAIRING_CODE_TTL_SECONDS`.
+- pairing code is single-use.
+- daemon stores its private identity key in OS keychain or a 600-permission local identity file.
+- Worker stores only public key, owner binding, device metadata and capabilities.
+- `relay_token` is short-lived and must be refreshable by signing a Worker challenge.
+
+### BridgeEnvelope
+
+All WebSocket messages use a signed JSON envelope.
+
+```ts
+type BridgeEnvelope = {
+  version: 1;
+  session_id: string;
+  agent_id: string;
+  message_id: string;
+  seq: number;
+  kind:
+    | 'hello'
+    | 'heartbeat'
+    | 'capabilities'
+    | 'inventory_summary'
+    | 'activity_summary'
+    | 'command'
+    | 'command_ack'
+    | 'command_result'
+    | 'error';
+  issued_at: string;
+  expires_at?: string;
+  idempotency_key?: string;
+  payload: unknown;
+  signature: string;
+};
+```
+
+Requirements:
+
+- `version` must equal `BRIDGE_PROTOCOL_VERSION`.
+- `message_id` is unique and `seq` is monotonic per session.
+- signed `hello` is required before AgentSession DO marks the daemon online.
+- command messages must include `expires_at`.
+- command results must reference original `message_id` or `idempotency_key`.
+- messages must not contain OWS token, wallet passphrase, wallet private key, exchange raw API secret or full local DB rows.
+
+### RemoteCommand
+
+```ts
+type RemoteCommand =
+  | { type: 'agent.status' }
+  | { type: 'agent.start'; command?: string }
+  | { type: 'agent.stop' }
+  | { type: 'inventory.sync'; scope?: string[] }
+  | { type: 'policy.preview'; strategy: StructuredStrategy }
+  | { type: 'policy.deploy'; strategy_hash: string; policy_ref: string }
+  | { type: 'policy.pause'; policy_id: string }
+  | { type: 'policy.resume'; policy_id: string }
+  | { type: 'policy.revoke'; policy_id: string }
+  | { type: 'venue.recheck'; venue_id: string }
+  | { type: 'orders.cancel'; policy_id: string; venue_id?: string }
+  | { type: 'emergency.stop'; scope: 'global' | 'policy' | 'venue'; target_id?: string };
+```
+
+Rules:
+
+- Worker may request; Local Agent decides.
+- `agent.start` and `agent.stop` control only the local external Agent child process. They do not grant trading authority.
+- Local Agent must validate policy scope, credential scope, Guardian result, inventory freshness and owner approval requirements before executing.
+- Unsupported or high-risk remote actions return `OWNER_APPROVAL_REQUIRED`, `POLICY_SCOPE_DENIED`, `CREDENTIAL_SCOPE_DENIED`, `STALE_INVENTORY`, `SESSION_REVOKED`, `COMMAND_EXPIRED` or `UNSUPPORTED_REMOTE_COMMAND`.
+- Withdrawal, wallet/key export, raw secret reveal, exchange key import and policy limit increase are not supported remotely.
+- External Agent stdout/stderr must be size-bounded and treated as untrusted data.
+
+### Worker API
+
+```text
+POST /api/local-agents/pairing
+POST /api/local-agents/pair
+GET  /api/local-agents
+GET  /api/local-agents/:agent_id
+POST /api/local-agents/:agent_id/revoke
+GET  /api/local-agents/:agent_id/connect
+POST /api/local-agents/:agent_id/commands
+GET  /api/local-agents/:agent_id/commands/:command_id
+GET  /api/local-agents/:agent_id/activity
+```
+
+Rules:
+
+- `/connect` requires WebSocket upgrade and a valid relay token.
+- Worker validates owner/session before routing to AgentSession DO.
+- AgentSession DO validates signed `hello`, heartbeat sequence, command expiry and idempotency.
+- AgentSession DO marks status `stale` after `AGENT_BRIDGE_STALE_SECONDS` without heartbeat.
+- Cloudflare deploys may drop WebSockets; daemon must reconnect with backoff and local tick loop must continue offline.
+
+## 5. Composable Runtime Contract
+
+Runtime Core is shared by the Local Agent daemon and the optional Worker/Durable Object demo. It owns policy loading, adapter selection, Guardian evaluation and activity logging. Protocol-specific behavior lives behind ExecutorAdapter.
 
 ```ts
 type ExecutorKind = 'deepbook';
@@ -64,8 +342,9 @@ interface ExecutorAdapter {
   kind: ExecutorKind;
   readMarket(policy: PolicySnapshot): Promise<MarketSnapshot>;
   planExecution(policy: PolicySnapshot, strategy: StructuredStrategy, market: MarketSnapshot): Promise<ExecutionPlan>;
-  buildPtb(plan: ExecutionPlan, auth: MoveGateAuthContext): Promise<Transaction>;
-  parseExecutionResult(result: SuiTransactionResult): Promise<ActivityEvent>;
+  buildPtb?(plan: ExecutionPlan, auth: MoveGateAuthContext): Promise<Transaction>;
+  buildOrder?(plan: ExecutionPlan, signer: SignerRef): Promise<VenueOrderRequest>;
+  parseExecutionResult(result: SuiTransactionResult | VenueOrderResult): Promise<ActivityEvent>;
 }
 ```
 
@@ -76,7 +355,9 @@ Rules:
 - The adapter must return an `ExecutionPlan` before any PTB is signed.
 - Guardian checks run against the `ExecutionPlan`; an adapter cannot submit directly.
 - `quote_amount`, `estimated_slippage_bps`, `target_id`, and `action_type` must match the values encoded in the PTB.
-- Runtime Core must use the same adapter interface in Worker/Durable Object and future CLI daemon code.
+- Runtime Core must use the same adapter interface in Local Agent and optional Worker/Durable Object demo code.
+- Non-chain adapters use `buildOrder` and must still emit an auditable `ExecutionPlan`.
+- Chain adapters use `buildPtb` and SignerRouter routes signing to OWS or the existing Worker demo signer.
 
 Post-MVP adapter candidates:
 
@@ -86,7 +367,7 @@ Post-MVP adapter candidates:
 
 These adapters are not allowed to reuse the Deepbook-specific `pool_id` constraint unless their target semantics are equivalent. If they need position ids, vault ids, lending market ids or bin ranges, add adapter-specific wrapper fields or a new wrapper version.
 
-## 4. Move Package Surface
+## 6. Move Package Surface
 
 ### 架构：MoveGate + SentryPolicyWrapper
 
@@ -280,7 +561,7 @@ Postconditions:
 - Increments `wrapper.spent_amount` by `quote_amount_spent`.
 - Emits `AgentTradeExecuted`.
 
-## 5. Sentry Events
+## 7. Sentry Events
 
 Sentry 自身发出以下事件。MoveGate 的 ActionReceipt 提供额外的不可变审计轨迹（`freeze_object`）。
 
@@ -337,7 +618,7 @@ Guardian reason codes:
 - `6`: concentration risk warning.
 - `7`: mandate and wrapper mismatch.
 
-## 6. Structured Strategy
+## 8. Structured Strategy
 
 Natural language must parse into this JSON shape before confirmation:
 
@@ -400,7 +681,7 @@ Additional hash conformance vectors:
 | `{"text":"当 SUI 下跌超过 8% 时启动 500 USDC 风险响应策略。"}` | `0x041503ce868c54347445d99743f185ba13ece965d179e0f40c36e22083c3e80f` |
 | `{"amount":"1000000000000000000000000","threshold_pct":"8.0"}` | `0x93bc4163c34e49983b49c47cc70821f1c6b236ba418cf02cbe88adf653db03fa` |
 
-## 7. PTB Construction
+## 9. PTB Construction
 
 An execution PTB is valid only if it binds MoveGate authorization, adapter action, MoveGate receipt creation and SentryPolicyWrapper recording into one transaction intent. The MVP Deepbook command sequence is:
 
@@ -417,7 +698,7 @@ If Deepbook or a future adapter requires a command order that prevents the wrapp
 
 `record_agent_trade` 接受 `auth_token: movegate::mandate::AuthToken`，但不直接调用 `consume_auth_token`。它把 token 交给 `movegate::receipt::create_success_receipt`，由 MoveGate 消费 token 并冻结 ActionReceipt。因为 AuthToken 是 zero-ability struct（no `store`, `copy`, `drop`），Move 编译器在编译时强制它必须在获得它的 PTB 内被消费。这消除了"AuthToken 被存储、复制或逃逸"的可能性，同时保留 MoveGate 的审计轨迹。
 
-## 8. HTTP API Contract
+## 10. HTTP API Contract
 
 ### `POST /api/intents/parse`
 
@@ -628,7 +909,7 @@ Allowed `action` values:
 - `stopped_expired`
 - `error`
 
-## 9. Agent State Machine
+## 11. Agent State Machine
 
 | Current | Trigger | Condition | Next | Side effect |
 | --- | --- | --- | --- | --- |
@@ -646,7 +927,7 @@ Allowed `action` values:
 
 `Paused` is reserved for repeated Guardian or execution failures. MVP may keep blocked policies in `Monitoring` if failures are transient, but must never execute while a blocking condition remains true.
 
-## 10. Guardian Algorithm
+## 12. Guardian Algorithm
 
 Every tick must read both the MoveGate Mandate and SentryPolicyWrapper, then run checks in this order:
 
@@ -681,7 +962,7 @@ Block logging policy:
 - Hard blocks after a trigger condition is met are runtime log by default.
 - MVP does not emit on-chain `GuardianBlocked`. Public no-trade proof is deferred until a post-MVP design can bind block events to a valid Mandate without creating gas spam or post-revocation noise.
 
-## 11. Edge Cases
+## 13. Edge Cases
 
 - Natural language does not include budget.
 - Natural language includes unsupported asset.
@@ -701,6 +982,6 @@ Block logging policy:
 - User tries to revoke an already revoked Policy.
 - Deployment already has `MAX_ACTIVE_POLICIES_PER_DEPLOYMENT` active policies.
 
-## 12. Implementation Rule
+## 14. Implementation Rule
 
 When implementation begins, tests must be written from `docs/05-test-spec.md` before production code. Any code behavior that differs from this technical spec must update this document first.

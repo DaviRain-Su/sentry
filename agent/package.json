@@ -1,0 +1,17 @@
+{
+  "name": "@sentry/daemon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Sentry local daemon: Worker bridge client and external agent process manager.",
+  "bin": {
+    "sentry-daemon": "src/index.mjs"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "check": "node src/index.mjs --help"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

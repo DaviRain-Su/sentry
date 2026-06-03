@@ -216,7 +216,7 @@ export default function App({ onExit }) {
   const [liveFeed, setLiveFeed] = useState(false);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState(null);
-  const [mode, setMode] = useState('cloud');
+  const [mode, setMode] = useState('local');
   const [agentOn, setAgentOn] = useState(true);
   const [crashState, setCrashState] = useState('idle');
   const [risk, setRisk] = useState(38);
@@ -956,7 +956,7 @@ export default function App({ onExit }) {
               >
                 {[
                   { id: 'local', icon: 'cpu', l: 'Local' },
-                  { id: 'cloud', icon: 'cloud', l: 'Cloud' },
+                  { id: 'cloud', icon: 'cloud', l: 'Remote' },
                 ].map((m) => (
                   <button
                     key={m.id}
@@ -1026,11 +1026,14 @@ export default function App({ onExit }) {
                       width: 7,
                       height: 7,
                       borderRadius: '50%',
-                      background: mode === 'cloud' ? 'var(--safe)' : 'var(--t3)',
-                      boxShadow: mode === 'cloud' ? '0 0 6px var(--safe)' : 'none',
+                      background: mode === 'local' ? 'var(--warn)' : 'var(--safe)',
+                      boxShadow:
+                        mode === 'cloud'
+                          ? '0 0 6px var(--safe)'
+                          : '0 0 6px color-mix(in srgb, var(--warn) 65%, transparent)',
                     }}
                   />
-                  {mode === 'cloud' ? 'Cloud · online' : 'Local · offline'} · runtime
+                  {mode === 'cloud' ? 'Remote Worker · online' : 'Local · setup'} · runtime
                 </span>
                 <Icon name="chevR" size={13} style={{ color: 'var(--t3)' }} />
               </button>

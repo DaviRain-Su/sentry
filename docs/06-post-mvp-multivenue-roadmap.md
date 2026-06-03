@@ -8,12 +8,12 @@
 
 This roadmap does not change the hackathon MVP.
 
-Hackathon scope remains:
+Verified Sui Testnet scope remains:
 
 - Sui Testnet only.
 - MoveGate Mandate + SentryPolicyWrapper.
 - Deepbook as the only live executor adapter.
-- Cloud Agent with Local Agent extension points.
+- Worker demo path with Local Agent production direction.
 - No mainnet funds, no CEX custody, no multi-chain arbitrage promise.
 
 The long-term product can become a cross-chain, cross-venue autonomous execution network, but it must be built as a separate expansion layer. The safe framing is:
@@ -38,13 +38,18 @@ SentryAccount
   owner identities
     wallet / passkey / oauth / hardware signer
   agent modes
-    cloud agent / local daemon / hybrid signer
+    local daemon first / optional Worker bridge
   venue accounts
     sui policy object
     evm smart account
     solana delegated account
     hyperliquid api wallet + subaccount
     cex trade-only api key + subaccount
+  local custody services
+    OWS wallet vault
+    Sentry secret store
+    normalized inventory store
+    Worker bridge client
   strategy mandates
     risk response / DCA / grid / hedge / rebalance / arbitrage
   activity ledger
@@ -59,6 +64,7 @@ The product value is a consistent operator experience:
 - one activity trail;
 - one emergency stop surface;
 - venue-specific execution and settlement behind adapters.
+- local-first wallet signing and exchange key management.
 
 ## 3. Account Model
 
@@ -75,6 +81,8 @@ Required fields:
 - `mandates`
 - `global_risk_limits`
 - `emergency_state`
+- `local_vault_refs`
+- `inventory_sources`
 
 ### VenueAccount
 
@@ -105,6 +113,8 @@ Different venues enforce authority differently:
 - Solana can use protocol-level delegation, PDAs or app-specific programs.
 - Hyperliquid has API wallets, also called agent wallets, plus subaccounts and vaults.
 - OKX/Binance use API key permissions and subaccounts; there is no chain-enforced policy object.
+
+Local Agent is the place where these differences are managed. OWS can normalize chain wallet signing, but it does not manage exchange API keys or venue subaccount semantics.
 
 A single abstraction must expose these differences instead of hiding them.
 
@@ -250,7 +260,9 @@ Default safety model:
 - disable withdrawals by default;
 - require IP allow-listing;
 - cap daily notional and per-order notional in Sentry;
-- store keys in an isolated signer service or local daemon;
+- store raw keys in OS keychain / keyring through the Sentry Local Agent;
+- store only key handles, permissions, subaccount ids and rotation metadata in `~/.sentry`;
+- keep OWS wallet tokens separate from exchange API keys;
 - never claim chain-enforced non-custodial guarantees for CEX balances.
 
 Allowed autonomous actions by default:
@@ -446,6 +458,7 @@ Sui Testnet only. No change to current MVP.
 - Extract Runtime Core package.
 - Add adapter conformance tests.
 - Add Local Agent daemon.
+- Add Worker bridge pairing, heartbeat and AgentSession Durable Object status relay.
 - Add Sui protocol adapters after Deepbook.
 
 ### Stage 2 - Perps and CEX Adapters

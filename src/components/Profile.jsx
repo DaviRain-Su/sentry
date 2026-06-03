@@ -182,6 +182,287 @@ function FundingReadiness({ funding, live }) {
   );
 }
 
+function statusClass(status) {
+  if (['ready', 'safe', 'live', 'linked', 'scoped'].includes(status)) return 'badge-safe';
+  if (['syncing', 'planned', 'mixed'].includes(status)) return 'badge-warn';
+  if (['blocked', 'locked'].includes(status)) return 'badge-danger';
+  return 'badge-neutral';
+}
+
+function LocalAgentControl({ data, exchanges = [], onToast }) {
+  if (!data) return null;
+  const linkedExchanges = exchanges.filter((e) => e.status === 'connected').length;
+  const metric = (label, value, tone = 'var(--t0)') => (
+    <div
+      style={{
+        background: 'var(--glass)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--r-sm)',
+        padding: '11px 13px',
+      }}
+    >
+      <div className="eyebrow" style={{ fontSize: 9 }}>
+        {label}
+      </div>
+      <div className="mono" style={{ fontSize: 16, fontWeight: 600, marginTop: 4, color: tone }}>
+        {value}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="card" style={{ padding: 20 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+          marginBottom: 16,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <div className="eyebrow">Local Agent control plane</div>
+          <h3 className="display" style={{ fontSize: 18, fontWeight: 600, marginTop: 5 }}>
+            Wallet vault, exchange keys and asset inventory
+          </h3>
+          <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 5, maxWidth: 690 }}>
+            The local daemon signs through the OWS vault, keeps exchange credentials in the local
+            secret store, connects to the Worker bridge, and builds one normalized inventory before
+            Guardian allows execution.
+          </div>
+        </div>
+        <Button
+          size="sm"
+          className="rg-btn-2"
+          onPress={() =>
+            onToast &&
+            onToast(
+              'Local setup planned: sentry agent init && sentry agent pair <code>',
+              'var(--accent)'
+            )
+          }
+        >
+          <Icon name="cpu" size={14} /> Setup local
+        </Button>
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: 10,
+          marginBottom: 16,
+        }}
+      >
+        {metric('OWS wallets', data.vault.wallets, 'var(--accent)')}
+        {metric('Policy tokens', data.vault.apiTokens, 'var(--safe)')}
+        {metric('Exchange keys', data.secretStore.exchangeKeys, 'var(--warn)')}
+        {metric('Linked venues', linkedExchanges, 'var(--sui)')}
+      </div>
+
+      <div className="rg-2col" style={{ alignItems: 'stretch', marginBottom: 16 }}>
+        <div
+          style={{
+            background: 'var(--glass)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--r-md)',
+            padding: 15,
+          }}
+        >
+          <div className="card-title" style={{ marginBottom: 12 }}>
+            Open Wallet vault
+          </div>
+          {[
+            ['Standard', data.vault.standard],
+            ['Vault path', data.vault.path],
+            ['Policies', `${data.vault.policies} local policy files`],
+            ['Audit log', data.vault.audit],
+          ].map(([k, v]) => (
+            <MetaRow key={k} icon="key" label={k}>
+              <span className="mono" style={{ fontSize: 11.5, color: 'var(--t1)' }}>
+                {v}
+              </span>
+            </MetaRow>
+          ))}
+        </div>
+
+        <div
+          style={{
+            background: 'var(--glass)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--r-md)',
+            padding: 15,
+          }}
+        >
+          <div className="card-title" style={{ marginBottom: 12 }}>
+            Local secret store
+          </div>
+          {[
+            ['Storage', data.secretStore.path],
+            ['Rotation', data.secretStore.rotation],
+            ['Withdrawal keys', 'not accepted'],
+            ['Owner unlock', 'interactive or OS keychain'],
+          ].map(([k, v]) => (
+            <MetaRow key={k} icon="shield" label={k}>
+              <span className="mono" style={{ fontSize: 11.5, color: 'var(--t1)' }}>
+                {v}
+              </span>
+            </MetaRow>
+          ))}
+        </div>
+
+        <div
+          style={{
+            background: 'var(--glass)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--r-md)',
+            padding: 15,
+          }}
+        >
+          <div className="card-title" style={{ marginBottom: 12 }}>
+            Worker bridge
+          </div>
+          {[
+            ['Relay', data.bridge.relay],
+            ['Session', data.bridge.session],
+            ['Transport', data.bridge.transport],
+            ['Heartbeat', `${data.bridge.heartbeat} · stale ${data.bridge.staleAfter}`],
+            ['Commands', data.bridge.commandScope],
+          ].map(([k, v]) => (
+            <MetaRow key={k} icon="activity" label={k}>
+              <span className="mono" style={{ fontSize: 11.5, color: 'var(--t1)' }}>
+                {v}
+              </span>
+            </MetaRow>
+          ))}
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gap: 14,
+        }}
+      >
+        <div style={{ overflowX: 'auto' }}>
+          <div className="card-title" style={{ marginBottom: 10 }}>
+            Venue accounts
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+            <thead>
+              <tr style={{ color: 'var(--t2)' }}>
+                {['Venue', 'Authority', 'Custody', 'Assets', 'Status'].map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      textAlign: h === 'Venue' ? 'left' : 'right',
+                      padding: '8px 10px',
+                      fontSize: 9.5,
+                      fontFamily: 'var(--f-mono)',
+                      fontWeight: 500,
+                      letterSpacing: '0.1em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.venues.map((v) => (
+                <tr key={v.id} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={{ padding: '11px 10px' }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>{v.name}</div>
+                    <div className="mono" style={{ fontSize: 10, color: 'var(--t2)' }}>
+                      {v.kind} · {v.permissions}
+                    </div>
+                  </td>
+                  <td
+                    className="mono"
+                    style={{ padding: '11px 10px', textAlign: 'right', fontSize: 10.5 }}
+                  >
+                    {v.authority}
+                  </td>
+                  <td style={{ padding: '11px 10px', textAlign: 'right', fontSize: 11.5 }}>
+                    {v.custody}
+                  </td>
+                  <td
+                    className="mono"
+                    style={{ padding: '11px 10px', textAlign: 'right', fontSize: 10.5 }}
+                  >
+                    {v.assets}
+                  </td>
+                  <td style={{ padding: '11px 10px', textAlign: 'right' }}>
+                    <span className={`badge ${statusClass(v.status)}`} style={{ fontSize: 9 }}>
+                      <span className={v.status === 'live' ? 'dot pulse' : 'dot'}></span>
+                      {v.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div className="card-title" style={{ marginBottom: 10 }}>
+            Asset sources
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {data.assetSources.map((s) => (
+              <div
+                key={s.source}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--r-sm)',
+                  border: '1px solid var(--border)',
+                  background: 'var(--glass)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: 'var(--accent)' }}>
+                    <Icon name="radar" size={13} />
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{s.source}</span>
+                  <span className={`badge ${statusClass(s.status)}`} style={{ fontSize: 8.5 }}>
+                    {s.status}
+                  </span>
+                </div>
+                <div className="mono" style={{ fontSize: 10, color: 'var(--t2)', marginTop: 5 }}>
+                  {s.detail} · {s.cadence}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: 9,
+              marginTop: 12,
+              padding: '10px 12px',
+              borderRadius: 'var(--r-sm)',
+              background: 'var(--safe-dim)',
+            }}
+          >
+            <span style={{ color: 'var(--safe)', flexShrink: 0, marginTop: 1 }}>
+              <Icon name="shield" size={14} />
+            </span>
+            <div style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--t1)' }}>
+              OWS API tokens are for wallet signing. Exchange API keys stay separate, trade-only,
+              and are never reused as wallet credentials.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Profile({
   account,
   holdings,
@@ -1046,6 +1327,8 @@ export function Profile({
           </div>
         )}
       </div>
+
+      <LocalAgentControl data={a.localAgent} exchanges={a.exchanges || []} onToast={onToast} />
     </div>
   );
 }

@@ -1,20 +1,21 @@
 # Sentry Architecture v1.0
 
 状态：Draft
-日期：2026-06-01
-定位：Sentry：跨链自主 DeFi 风险代理平台
-当前实现：Sui Testnet MVP
-默认模式：Cloud first，Local Mode 作为后续扩展点
+日期：2026-06-01 · 更新：2026-06-03
+定位：Sentry：Agent 调度平台（Local Daemon × Agent Dispatch × Chain Policy）
+当前实现：Sui Testnet MVP（保留）
+默认模式：Local daemon + Agent dispatch（生产）；Cloud Worker 保留为 demo path
 
 ## 1. 架构目标
 
-Sentry 的架构目标是把 Agent 自主执行拆成三个层次：
+Sentry 是一个 **Agent 调度平台**，不是自己执行交易的 Agent。架构拆成四个层次：
 
-- 链上强约束：各链 Policy 合约（Sui: MoveGate + SentryPolicyWrapper; Solana: PDA + Anchor program; EVM: Safe module / ERC-4337）共同负责权限、预算、范围、过期、撤销和事件日志。
-- 链下策略核心：Runtime Core 负责自然语言策略解析后的定时监控、Policy 读取、Guardian 预检查、adapter 选择和 activity 写入。
-- 协议执行适配器：ExecutorAdapter 负责具体协议的市场读取、preview、PTB 片段和执行结果解析。MVP 只注册 Deepbook adapter；后续 Cetus DLMM、Scallop、Kai、LeafSheep/CDPM 类仓位管理都必须以 adapter 形式接入。
+- **链上强约束**：各链 Policy 合约（Sui: MoveGate + SentryPolicyWrapper; Solana: PDA + Anchor / Sigil; EVM: ERC-8004）共同负责权限、预算、范围、过期、撤销和事件日志。
+- **守护程序（Sentry daemon）**：策略管理、Tick 监控、Guardian 风险检查、Agent 调度、Activity 日志。不自行执行交易。
+- **Agent 调度层**：守护程序向外部 Agent（Claude Code、Codex、Kimi 等）分发结构化任务。外部 Agent 使用本机已有工具链（OWS、Solana CLI、钱包等）完成执行。
+- **Worker bridge**：可选的 Cloudflare Worker relay，用于远程状态展示、命令中继和 pairing。不代理执行，不保存 secrets。
 
-MVP 不追求通用自动交易平台，而是追求一个可演示、可验证、可撤销的 Agent Wallet 闭环。
+核心原则：Sentry 是"大脑"（策略 + 风控 + 调度），外部 Agent 是"手"（执行 + 签名）。守护程序不碰私钥。
 
 ## 2. 系统边界
 
@@ -23,41 +24,54 @@ User
   |
   v
 Web Dashboard
-  | login / confirm / revoke / inspect
+  | login / configure / confirm / revoke / inspect
+  | optional remote status and commands through Worker bridge
   v
-API Worker
-  | intent parse / PTB preview / policy submit
-  | register active policy / read runtime state
+Sentry Daemon API (localhost loopback-only)
+  | policy management / tick loop / Guardian / Agent dispatch / activity log
+  | outbound WebSocket to Cloudflare Worker bridge when paired
   v
-Runtime Core
-  | tick / monitor / guardian / adapter select
+Agent Dispatch Layer
+  | Agent registry: claude-code, codex, kimi, ...
+  | dispatch protocol: structured task → external Agent → execution result
   v
-Executor Adapter Registry
-  | MVP: deepbook
+External Agents (on user's machine)
+  | Claude Code / Codex / Kimi / ...
+  | use local environment: OWS vault, Solana CLI, wallets, chain RPCs
   v
-Sui Testnet
-  | MoveGate Mandate / SentryPolicyWrapper / PTB / Deepbook / events
-  v
-Dashboard Activity View
+Venues
+  | Sui Testnet / Solana devnet / EVM testnets / CEX APIs / perps APIs
+```
+
+Optional remote bridge:
+
+```text
+Web Dashboard
+  -> Cloudflare Worker Bridge API
+     -> AgentSession Durable Object
+        <-> outbound WebSocket held by Sentry CLI daemon
+            -> Sentry Daemon API
 ```
 
 ### In scope
 
-- zkLogin 登录和 owner address 获取。
-- Cloudflare Worker API。
-- Durable Object 保存每个 Policy 的运行状态。
-- Runtime Core 和 ExecutorAdapter 接口。
-- Move package 定义 SentryPolicyWrapper 和事件，并复用 MoveGate Mandate。
-- Deepbook V3 SDK 或 PTB 集成，作为首个 `deepbook` adapter。
+- zkLogin 登录和 owner identity。
+- **Sentry 守护程序（sentry daemon）**：CLI + loopback API + tick loop + Guardian + Agent dispatch + activity log。
+- **Agent registry & dispatch protocol**：注册外部 Agent，向它们分发结构化任务，接收执行结果。
+- OWS wallet vault、OS keychain/keyring — 由外部 Agent 使用，Sentry 守护程序不代理这些。
+- InventoryStore 守护程序归一化资产信息供 Guardian 消费。
+- Cloudflare Worker API 作为可选 Sui Testnet demo/read path。
+- Cloudflare Worker bridge 用于守护程序配对、远程状态展示和命令中继。
+- AgentSession Durable Object 用于 daemon WebSocket 协调。
+- Move 合约（MoveGate + SentryPolicyWrapper）— Sui Testnet demo 的链上约束。
 - Dashboard 展示和撤销。
 
 ### Out of scope for MVP
 
 - Mainnet 资金执行。
-- 完整本地 LLM runtime；MVP 只保留与 Cloud Agent 相同的 Policy、Guardian、ExecutorAdapter 接口扩展点。
-- 本地 CLI daemon 产品化；MVP 只保留运行时接口和任务拆解。
-- 任意自然语言到任意 PTB。
-- 多链、多 venue 交易；Post-MVP 通过 adapter registry 扩展。
+- 完整多链执行闭环。
+- 守护程序自行构建或签名交易。
+- 任意自然语言到任意交易。
 - 自动收益优化。
 
 ## 3. 组件
@@ -68,161 +82,132 @@ Dashboard Activity View
 
 - 提供 zkLogin 登录入口。
 - 收集自然语言策略和显式确认。
-- 展示结构化策略、PTB preview、Guardian warnings。
-- 展示 Policy 状态、预算、风险分数、执行日志。
+- 展示结构化策略、Guardian warnings。
+- 展示 Policy 状态、预算、风险分数、activity log。
 - 发起 owner revoke。
+- 展示守护程序在线状态、已注册 Agent 列表、Agent 能力矩阵。
+- 通过 Worker bridge 发送远程命令（仅 typed command，不代理本地 API）。
 
 Dashboard 不直接保存用户私钥，不直接替代链上 Policy 校验。
 
-### API Worker
+### Sentry 守护程序（Sentry Daemon）
 
 职责：
 
-- 提供 HTTP API。
-- 调用 intent parser，把用户输入映射到受支持策略模板。
-- 生成 human-readable PTB preview。
-- 提交 Policy 创建和撤销交易请求。
-- 把活跃 Policy 注册到 Durable Object。
-- 为 Dashboard 提供 activity 聚合 API。
-- 从部署配置读取唯一 MVP agent address，并在 preview、Policy 创建和 activity 中保持一致。
+- 以 `sentry agent run` 形式长期运行。
+- 管理策略（Policy）运行状态和生命周期。
+- 执行 tick loop：读资产状态 → Guardian 检查 → 若触发则构建 dispatch task。
+- **向外部 Agent 分发任务**：守护程序不自行执行交易。它构建结构化任务（policy context + constraints + expected action），发送给注册的外部 Agent。
+- 接收外部 Agent 的执行结果，写入 activity log。
+- 管理本地 inventory snapshot 供 Guardian 使用。
+- 提供 loopback-only HTTP API 给本机 Dashboard。
+- 管理 Agent registry：注册、验证、列出可用外部 Agent。
+- 通过 Worker bridge 连接云端（配对后），同步状态摘要和接收远程命令。
 
-Worker 是编排层；它不能成为唯一安全边界。
+```
+Sentry daemon
+  ├── PolicyManager
+  ├── TickLoop
+  ├── Guardian
+  ├── AgentRegistry
+  ├── AgentDispatcher（结构化任务 → 外部 Agent）
+  ├── ActivityWriter
+  ├── InventoryStore
+  ├── LoopbackAPI（localhost HTTP）
+  └── WorkerBridgeClient（outbound WebSocket）
+```
 
-### Durable Object Agent Runtime
-
-职责：
-
-- 一个 active Policy 对应一个 Durable Object instance。
-- 保存 agent runtime state、最近一次 tick 时间、最近一次 market snapshot、错误计数。
-- 定时执行 tick。
-- 调用 Runtime Core 检查 Policy 是否可执行。
-- 执行 Guardian。
-- 调用选定 ExecutorAdapter 构建并提交 PTB。
-- 将结果写回链上事件和 runtime log。
-
-Durable Object 只允许处理已确认的 Policy，不允许自己扩大预算、替换 pool 或延长过期时间。
-
-### Runtime Core
-
-职责：
-
-- 读取 Policy、Mandate、Wrapper、runtime state 和策略 JSON。
-- 根据 `strategy_type`、`executor_kind` 和部署配置选择 ExecutorAdapter。
-- 调用 adapter 读取协议状态并生成 `ExecutionPlan`。
-- 在提交前执行 Guardian；Guardian 只能读取 plan，不允许被 adapter 绕过。
-- 把 allow、blocked、executed、failed、stale 等状态写入 ActivityWriter。
-
-Runtime Core 是 Cloud Agent 和未来 Local CLI daemon 的共享内核。它不直接依赖 Cloudflare Durable Object，也不直接依赖 Deepbook SDK。
-
-### Executor Adapter Registry
+### Agent 调度层（Agent Dispatch Layer）
 
 职责：
 
-- 提供 `deepbook` adapter 的唯一 MVP 注册项。
-- 暴露统一接口：`readMarket`、`planExecution`、`buildPtb`、`parseExecutionResult`、`preview`.
-- 拒绝未注册的 `executor_kind`，返回 `UNSUPPORTED_EXECUTOR`。
-- 要求 adapter 在构建 PTB 前输出可审计的 `ExecutionPlan`：target id、quote amount、estimated slippage、action type、expected event。
+- **Agent Registry**：守护程序维护已注册的外部 Agent 列表。每个 Agent 注册时声明其能力（supported chains、actions、tools）。
+- **Agent Dispatch Protocol**：守护程序构建结构化任务，通过 subprocess/stdio 发送给外部 Agent。外部 Agent 返回结构化执行结果。
+- **Agent 不绑定**：守护程序不捆绑特定 Agent。用户可选择 Claude Code、Codex、Kimi 或任何兼容的 Agent 工具。
 
-Post-MVP adapter backlog：
+Agent dispatch task 结构：
 
-- `cdpm`：Cetus DLMM Position Manager / LeafSheep-style 仓位管理，支持 add/remove liquidity、collect fees、rebalance。
-- `scallop`：借贷仓位 supply/redeem/unwind。
-- `kai`：SAV vault supply/redeem。
+```ts
+type AgentTask = {
+  id: string;
+  policy_id: string;
+  policy_context: {
+    chain: string;
+    venue: string;
+    budget_remaining: string;
+    max_slippage_bps: number;
+    strategy_type: string;
+  };
+  action: {
+    type: 'swap' | 'place_order' | 'cancel_order' | 'check_health' | 'monitor';
+    params: Record<string, unknown>;
+  };
+  constraints: {
+    budget_cap: string;
+    slippage_cap_bps: number;
+    venue_scope: string[];
+    require_simulation: boolean;
+  };
+  expires_at_ms: number;
+};
+```
 
-新 adapter 不能直接扩大现有 Policy 的权限。若目标协议不等价于 Deepbook pool 约束，必须引入 adapter-specific wrapper 或升级 Policy schema。
+Agent dispatch result:
 
-### Local CLI Daemon（Post-MVP）
+```ts
+type AgentTaskResult = {
+  task_id: string;
+  status: 'executed' | 'blocked' | 'failed' | 'needs_approval';
+  tx_digest?: string;
+  venue_order_id?: string;
+  evidence?: Record<string, unknown>;
+  reason?: string;
+  executed_at_ms: number;
+};
+```
 
-职责：
+MVP 阶段先支持 CLI-based 调度（守护程序通过 subprocess 调用 Agent CLI）。后续可扩展 MCP（Model Context Protocol）。
 
-- 以 `sentry daemon run` 形式长期运行本地 agent。
-- 管理本地 agent key 或外部 signer 引用，私钥不进入 Cloud Worker。
-- 轮询或订阅 Policy 状态，执行与 Cloud Agent 相同的 Runtime Core。
-- 使用同一 ExecutorAdapter registry 构建 PTB。
-- 提供 `status`、`policies list`、`tick`、`logs`、`stop` 等操作入口。
+### PolicyReader / Guardian / InventoryStore（共享核心）
 
-CLI daemon 是 Local Mode 的必要载体。没有长期进程，本地 Agent 无法可靠执行 tick、错误恢复、重试退避和日志持久化。
+这些是守护程序内部的核心组件，从现有 `core/` 层复用：
 
-### Dashboard Activity View
+- **PolicyReader**：读取链上 Policy（Mandate + Wrapper）和本地策略配置。
+- **Guardian**：纯函数，基于策略约束、market snapshot 和 proposed action 返回 allow/block。
+- **InventoryStore**：归一化 OWS wallets、chain RPC balances、CEX balances、perps positions 和 market data。Guardian 只消费此快照。
 
-职责：
+这些组件不依赖任何特定链的 SDK，是守护程序和可选 Worker demo 的共享内核。
 
-- Dashboard 不直接索引链上事件；MVP 通过 `GET /api/policies/:wrapper_id/activity` 轮询 Worker。
-- Worker 聚合四类数据：MoveGate Mandate snapshot、SentryPolicyWrapper snapshot、链上事件 metadata、Durable Object runtime state。
-- 链上 Mandate + Wrapper 是最终状态源；如果 runtime state 与链上状态冲突，Dashboard 必须优先显示链上状态并标记 runtime stale。
-- MVP 默认 5 秒轮询一次；这是 Sui Testnet RPC 频率、用户可感知反馈和实现复杂度之间的平衡。不实现 WebSocket 或专用事件索引器。
-- Agent runtime 默认 60 秒 tick 一次；Dashboard 轮询只刷新状态，不触发交易执行。
-
-### Move 合约层（基于 MoveGate）
-
-Sentry 不重新发明 Agent 授权协议。它基于 **MoveGate** 的 Mandate、AuthToken 和 ActionReceipt 基础设施，叠加 SentryPolicyWrapper 实现 DeFi 风险响应特有的约束。
-
-#### MoveGate（复用）
-
-职责：
-
-- **Mandate**：Agent 授权、可撤销、过期、hot-potato AuthToken 同一 PTB 强制消费。
-- **AgentPassport**：Agent 链上身份建立（自动创建，附带使用）。
-- **ActionReceipt**：`freeze_object` 不可变审计轨迹，每次授权操作产生永久记录。
-
-#### SentryPolicyWrapper（自有）
-
-MoveGate 是通用授权基础设施，不覆盖 DeFi 风险响应特有约束。SentryPolicyWrapper 是一个 Shared Object，存储 MoveGate 不覆盖的部分：
-
-- `pool_id`：仅允许此 Deepbook pool。MoveGate 的 Mandate 有 `protocol` 白名单但无细粒度 pool 级约束。
-- `budget_ceiling` 和 `spent_amount`：递减总预算模型（MoveGate 的 daily limit 每 epoch 重置，不是累计递减）。
-- `max_slippage_bps`：DeFi 特有的交易滑点约束。
-- `strategy_hash`：绑定链上策略与用户确认的 JSON 内容。
-- `record_agent_trade`：递增 `spent_amount` 并 emit `AgentTradeExecuted` 事件。
-- 将 Mandate 与其关联（`mandate_id` 引用）。
-
-#### 执行 PTB 结构
-
-单次交易必须在同一个 PTB 内完成：
-
-1. MoveGate `authorize_action<BudgetCoin>(mandate, passport, SENTRY_PROTOCOL_ADDRESS, amount, ACTION_DEEPBOOK_RESCUE)` → 获得 AuthToken（hot potato）。
-2. Deepbook swap/order（pool_id, amount, min_out）。
-3. SentryPolicyWrapper `record_agent_trade(...)` 校验 wrapper 约束，调用 MoveGate `create_success_receipt(...)` 消费 AuthToken 并冻结 ActionReceipt，再递增 `spent_amount` 并 emit `AgentTradeExecuted`。
-
-链上校验是最终安全边界。链下 Guardian 通过并不代表可绕过链上检查。
-
-### Deepbook ExecutorAdapter
+### Worker Bridge API（可选远程 relay）
 
 职责：
 
-- 读取 pool 状态和价格。
-- 生成 Deepbook-specific `ExecutionPlan`，包括 pool id、quote amount、min_out 和 estimated slippage。
-- 在 MoveGate AuthToken 的同一 PTB 内构建 Deepbook swap call。
-- 执行最小可演示订单。
-- 将执行金额和成交结果通过 SentryPolicyWrapper 回填，并由 wrapper 调用 MoveGate receipt 创建 ActionReceipt。
+- 创建 pairing code，让本机 CLI daemon 与浏览器 owner session 绑定。
+- 接受 daemon 的 outbound WebSocket upgrade。
+- 将连接转发到对应 AgentSession Durable Object。
+- 提供 paired agent 列表、online/stale/offline 状态。
+- 接受 Dashboard 发出的 typed remote command。
+- 校验 owner session、agent public key、relay token、signed envelope、command allowlist。
 
-MVP 优先选一个流动性和测试资产可用的 Sui Testnet pool。具体 pool id 必须在实现前通过最新 Testnet 状态确认。
+Worker Bridge API 是非托管通讯层。不代理任意 localhost API，不保存 OWS token、wallet passphrase、exchange raw API secret。
 
-### Route Decision: MoveGate Integration
+### AgentSession Durable Object（bridge 协调）
 
-MVP 选择复用 MoveGate 而非独立实现授权协议，原因：
+职责：
 
-- AuthToken hot-potato 机制（同一 PTB 强制消费、编译器级安全保障）已由 MoveGate 测试套件覆盖验证；自建等价安全需要更多测试。
-- 复用已部署的 Mandate、AgentPassport 和 ActionReceipt 基础设施，让 Sentry 把工程重心放在风险响应策略、Deepbook 执行和 Dashboard 闭环。
-- 评委印象：站在成熟基础设施上构建垂直应用优于不完整的自建授权协议。
-- Sentry 的差异化在自然语言 → 风险响应策略 → Deepbook 执行 → zkLogin 闭环，不在底层授权协议。
+- 一个 paired daemon 对应一个 AgentSession DO。
+- 保存 agent_id、owner id、device public key、capabilities、last heartbeat、session state。
+- 接受 daemon WebSocket 并验证 signed hello。
+- 接受命令投递，向 daemon 转发，等待 ack/result。
+- 处理 heartbeat、stale/offline、reconnect、idempotency。
 
-Phase B0 将确认 MoveGate 合约稳定性（package ID `0xec91e6...` 已在 Sui Testnet 部署，83 tests 通过）。
+AgentSession DO 不保存本地 secrets。所有 remote command 最终仍由本地守护程序校验。
 
-Critical integration assumption: the MoveGate Mandate must be accessible to future agent-signed PTBs without owner co-signing. Preferred route is to make the Mandate shared during the owner creation PTB. If this cannot be compiled against MoveGate's current package, Phase C must fall back to the independent shared `RescuePolicy` design before Worker execution code starts.
+### Move 合约层（基于 MoveGate — Sui Testnet demo）
 
-### Agent Interface
+Sentry 复用 MoveGate 的 Mandate、AuthToken 和 ActionReceipt 基础设施，叠加 SentryPolicyWrapper 实现 DeFi 风险响应约束。详见 Sui 相关代码：`move/sentry/`、`worker/src/sui-tx.js`。
 
-Cloud Agent 和未来 Local Agent 必须共享同一组接口边界：
-
-- `PolicyReader`：读取 MoveGate Mandate、SentryPolicyWrapper、事件和剩余额度。
-- `MarketReader`：读取 adapter 需要的协议状态、价格和预计滑点；MVP 来源是 Deepbook pool。
-- `Guardian`：基于 Mandate、Wrapper、market snapshot 和 proposed trade 返回 allow/block。
-- `ExecutorAdapter`：生成协议执行计划、构建 PTB 片段并解析执行结果。
-- `Signer`：以被授权 agent address 签名；Cloud Mode 使用 Worker secret，Local Mode 使用 CLI daemon key 或外部 signer。
-- `ActivityWriter`：写 runtime log。MVP 不为 Guardian block 写链上事件。
-
-MVP 只实现 Cloud Agent 和 `deepbook` adapter。Local Agent 后续复用这些接口，不改变 MoveGate + Wrapper 合约 surface。
+此合约层服务于 Sui Testnet demo。对于 Solana / EVM 等 venue，链上约束由对应链的授权基础设施提供（Sigil、ERC-8004 等），Sentry 守护程序通过 Guardian 做链下预检查。
 
 ## 4. 数据流
 
@@ -233,108 +218,108 @@ Natural language
   -> supported strategy template
   -> structured strategy
   -> Guardian static checks
-  -> PTB preview
+  -> policy/action preview
   -> user confirm
-  -> create_policy PTB
-  -> MoveGate mandate_id + SentryPolicyWrapper wrapper_id
-  -> API Worker registers wrapper_id with Durable Object
-  -> Durable Object activation
+  -> chain policy / venue mandate created
+  -> daemon registers policy in local state
 ```
 
-### Agent Tick
+### Agent Tick（守护程序内部）
 
 ```
-tick(wrapper_id)
-  -> read SentryPolicyWrapper
-  -> read linked MoveGate Mandate
-  -> stop if mandate revoked or expired
-  -> read wrapper budget and spent_amount
-  -> select executor adapter from strategy.executor_kind
-  -> adapter reads protocol market/state data
+tick(policy_id)
+  -> refresh inventory snapshot
+  -> read chain/venue policy state
+  -> stop if revoked or expired
   -> evaluate trigger
-  -> adapter plans execution
-  -> run Guardian checks
-  -> build authorize_action + adapter action + record_agent_trade PTB
-  -> submit transaction as agent
-  -> record trade event or runtime block
-  -> update dashboard-readable runtime state
+  -> run Guardian checks on proposed action
+  -> if blocked: record blocked reason, wait next tick
+  -> if triggered + allowed:
+       build AgentTask (policy_context + action + constraints)
+       dispatch to registered external Agent
+       wait for AgentTaskResult
+       write to activity log
+       update local state
+```
+
+### Agent Dispatch
+
+```
+daemon
+  -> AgentTask { policy_context, action, constraints }
+  -> external Agent (Claude Code / Codex / Kimi ...)
+  -> Agent uses local environment (OWS / CLI / wallets) to execute
+  <- AgentTaskResult { status, tx_digest, evidence, reason }
+daemon
+  -> write activity log
+  -> sync summary to Dashboard / Worker bridge
 ```
 
 ### Revoke
 
 ```
 owner click revoke
-  -> build revoke PTB
-  -> submit owner transaction
-  -> MoveGate mandate.revoked = true
-  -> emit PolicyRevoked
-  -> Dashboard polls activity API and reads revoked chain state
-  -> Durable Object state = Revoked
+  -> submit revoke transaction / revoke API key
+  -> chain policy revoked or venue key cancelled
+  -> daemon detects revoked state
   -> future ticks no-op
+  -> Dashboard reflects revoked
+```
+
+### Pairing & Remote Command
+
+```
+Dashboard → POST /api/local-agents/pairing → pairing_code
+CLI → sentry agent pair <code> → POST /api/local-agents/pair
+Daemon → WebSocket connect → signed hello → session_accepted
+Dashboard → POST /api/local-agents/:id/commands → Worker → AgentSession DO → daemon
+Daemon → validates locally → executes → returns command_result
 ```
 
 ## 5. Trust Model
 
-- Owner trusts Sui chain, the deployed MoveGate contracts, and the SentryPolicyWrapper for enforcement.
-- Owner does not need to trust Cloud Agent with unlimited authority.
-- Agent can only act through a Mandate that names the agent address, paired with a SentryPolicyWrapper that constrains pool, budget, slippage and strategy.
-- ExecutorAdapters are not trusted policy engines. They propose `ExecutionPlan`; Guardian and chain constraints decide whether it can execute.
-- The AuthToken hot-potato mechanism (Move type-system enforced) ensures authorization cannot escape the execution PTB.
-- MVP agent address is deployment-controlled. Users can inspect it before confirmation but cannot choose it.
-- Dashboard and Worker can fail closed; if they disappear, owner can still revoke with a direct transaction path once CLI/script support exists.
-- Any off-chain risk score is advisory unless mirrored by a chain-enforced condition.
+- Owner trusts chain policy contracts for enforcement.
+- Owner trusts the local machine and the external Agent tools they choose.
+- Owner does NOT need to trust Sentry daemon with wallet private keys or exchange API secrets — daemon doesn't touch them.
+- Owner may optionally trust Cloudflare Worker/DO as a relay, but not as custody or execution.
+- Worker bridge compromise cannot expose local secrets; daemon still validates all commands locally.
+- Guardian + chain constraints are the final safety boundary.
+- External Agents (Claude Code / Codex / Kimi) are not trusted by default — they act within the policy constraints that the daemon provides.
 
-### Dependency Trust
+## 6. Key Management
 
-- Sentry trusts MoveGate's Mandate and AuthToken for agent authorization and ActionReceipt for the audit trail.
-- If MoveGate has a critical bug, Sentry inherits that risk. The wrapper contract limits the blast radius: pool_id, budget, slippage, and strategy_hash are enforced by Sentry's own code regardless of MoveGate state.
-- MoveGate's contracts are open-source, deployed on Sui Testnet (verified), with 83 tests and 96.66% line coverage.
-
-## 6. MVP Key Management
-
-- Agent key is generated per Testnet deployment and its public address is published as `SENTRY_AGENT_ADDRESS`.
-- The private signing credential is stored only as a Worker secret for deployed Cloud Mode and as a local `.dev.vars` secret for local development; it is never bundled into Dashboard code or docs.
-- If the Worker is compromised, the attacker can only spend through policies that name that agent and only within each policy's pool, budget, slippage and expiry constraints.
-- Key rotation creates a new `SENTRY_AGENT_ADDRESS` for new policies. Existing policies must be revoked and recreated by owners; the system does not silently migrate policy authority.
-- Production hardening requires hardware-backed signing or external signer isolation; MVP accepts Worker-secret custody because policies are Testnet-only and chain-limited.
+- 链上 wallet secret 存在 OWS vault（`~/.ows`），由外部 Agent 调用 OWS 签名。Sentry 守护程序不代理 OWS。
+- 交易所 API key 存在 OS keychain/keyring，由外部 Agent 在需要时读取。守护程序保存 key handle + metadata（权限、subaccount）用于 scope 校验。
+- 守护程序只持有自己的 identity key（用于 Worker bridge signed envelope），不持有任何资金相关密钥。
+- Sui Testnet Worker demo 的 agent key 仅限 demo 路径，不与生产混淆。
 
 ## 7. Failure Modes
 
-- Intent parse ambiguous：return AwaitingConfirm with warnings; do not create Policy.
-- PTB preview cannot be generated：block confirmation.
-- Policy creation fails：do not activate Durable Object.
-- Tick market read fails：record runtime error and retry next tick.
-- Guardian fails：record runtime blocked reason; do not submit Deepbook order.
-- Deepbook transaction fails：record failed execution in runtime log; do not increment spent_amount unless chain event confirms execution.
-- Revoke succeeds but Durable Object misses update：next chain read must detect revoked and stop.
-- Dashboard polls before Durable Object updates：activity API returns chain `revoked=true` and marks runtime state stale.
-- Agent submits stale transaction after expiry：MoveGate authorization or Wrapper checks must reject.
+- Intent parse ambiguous：return warnings; block policy creation.
+- Tick market read fails：retry next tick.
+- Guardian blocks：record reason; no task dispatched.
+- External Agent fails：record error; retry or escalate to owner.
+- External Agent returns unverifiable result：daemon marks as unresolved; does not update spent_amount.
+- Revoke succeeds but daemon misses update：next chain/policy read detects and stops.
+- Worker bridge disconnects：daemon continues local tick; reconnects with backoff.
+- Duplicate remote command：daemon deduplicates by idempotency key.
 
 ## 8. Deployment Shape
 
 MVP deployment targets:
 
-- Web Dashboard：single frontend app.
-- API Worker：Cloudflare Worker.
-- Agent Runtime：Cloudflare Durable Objects.
-- Chain：Sui Testnet package.
+- Web Dashboard：single frontend app (Cloudflare Pages).
+- Sentry daemon：CLI + loopback API + Agent dispatch.
+- Worker bridge：optional Cloudflare Worker + AgentSession DO.
+- External Agents：user-installed (Claude Code, Codex, Kimi, etc.).
+- Chain：Sui Testnet package (demo); Solana devnet (next).
 
 Production hardening backlog:
 
-- Dedicated event indexer.
-- Migrate Worker reads behind a `ChainDataProvider` boundary from JSON-RPC/SuiClient reads to Sui GraphQL RPC, with gRPC reserved for low-latency agent monitoring and Archival Store-backed providers for history/replay.
-- Optional Seal + Walrus encrypted policy record layer for private strategy snapshots, backtests, reasoning traces and incident reports; never for wallet or agent private keys.
-- Optional `SignerAdapter` layer for local daemon, hardware signer, remote signer or WaaP-style two-party signing; MoveGate + SentryPolicyWrapper remain the Sui on-chain enforcement layer.
-- Direct owner emergency revoke script.
-- Multi-agent key rotation.
-- Local CLI daemon with same Runtime Core, Policy, Guardian and ExecutorAdapter interfaces.
-- Optional `PiWorkerAgentRuntime` adapter for operator console and local/cloud agent-session parity; see [`docs/07-pi-worker-assessment.md`](07-pi-worker-assessment.md). It must not receive `AGENT_KEY` until a separate security review passes.
-- Adapter SDK for CDPM / Cetus DLMM, Scallop and Kai integrations.
-- Strategy Marketplace, Opportunity Scanner and multi-leg strategy templates for funding, perp spread, lending, borrow health, LP range management, rebalance and alert-only watchtower; see [`docs/09-market-product-and-frontend-roadmap.md`](09-market-product-and-frontend-roadmap.md).
-- Multivenue control plane for Sui, EVM, Solana, Hyperliquid and CEX venue accounts; see [`docs/06-post-mvp-multivenue-roadmap.md`](06-post-mvp-multivenue-roadmap.md).
-- Settlement adapters for LI.FI, deBridge and native venue transfers, used for inventory rebalancing rather than hot-path execution.
-- Mainnet deployment checklist and audit.
-
-Multivenue expansion must preserve the MVP security boundary: adapters propose `ExecutionPlan`s, Guardian approves or blocks, and each venue keeps its own authority model. Sui can enforce policy on-chain through Move objects; EVM, Solana, Hyperliquid and CEX integrations need venue-specific account wrappers, modules, delegates, agent wallets, subaccounts or API keys. Sentry should unify strategy, risk and activity, not pretend every venue has identical custody or enforcement semantics.
-
-See [`docs/08-sui-data-agent-stack-assessment.md`](08-sui-data-agent-stack-assessment.md) for the Sui Data Stack, Seal/Walrus, WaaP, Sui Stack CRM and Sui Agent Skills assessment. See [`docs/09-market-product-and-frontend-roadmap.md`](09-market-product-and-frontend-roadmap.md) for market research, product surfaces and frontend design backlog.
+- Agent dispatch protocol formalization (MCP).
+- Solana chain policy (Sigil or custom Anchor program).
+- EVM chain policy (ERC-8004).
+- Hyperliquid adapter (via external Agent).
+- Multi-agent concurrency and conflict resolution.
+- Strategy Marketplace and multi-leg templates.
+- Dedicated event indexer and GraphQL migration.

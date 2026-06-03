@@ -6,7 +6,13 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "durable_objects": {
-    "bindings": [{ "name": "AGENT_RUNTIME", "class_name": "AgentRuntime" }]
+    "bindings": [
+      { "name": "AGENT_RUNTIME", "class_name": "AgentRuntime" },
+      { "name": "AGENT_SESSIONS", "class_name": "AgentSession" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentRuntime"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AgentRuntime"] },
+    { "tag": "v2", "new_sqlite_classes": ["AgentSession"] }
+  ]
 }

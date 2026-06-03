@@ -1450,24 +1450,24 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                       Where should the agent run?
                     </h2>
                     <p style={{ color: 'var(--t1)', fontSize: 13.5, marginBottom: 18 }}>
-                      Both modes enforce the same on-chain policy. Choose where the decision logic
-                      lives.
+                      Local is the default runtime. Remote Worker mode remains useful for Testnet
+                      demos, but wallet keys and exchange API keys should stay on this machine.
                     </p>
                     <div className="rg-2col">
                       {[
                         {
                           id: 'local',
                           icon: 'cpu',
-                          t: 'Local-first',
-                          s: 'Your own LLM (Ollama / Claude Desktop). Decision logic never leaves your machine — maximum privacy.',
-                          tags: ['private', 'BYO LLM'],
+                          t: 'Local Agent',
+                          s: 'Daemon on your machine. Uses OWS for wallet signing, local secret storage for exchange keys, and local logs for audit.',
+                          tags: ['default', 'OWS vault', 'trade keys local'],
                         },
                         {
                           id: 'cloud',
                           icon: 'cloud',
-                          t: 'Cloud',
-                          s: 'Cloudflare Worker + Durable Objects keep watching 24/7, even when your laptop is closed.',
-                          tags: ['always-on', 'zero-setup'],
+                          t: 'Remote Worker',
+                          s: 'Cloudflare Worker + Durable Objects for the Sui Testnet demo path. Useful for always-on reads, not the production custody model.',
+                          tags: ['testnet', 'optional'],
                         },
                       ].map((m) => (
                         <div

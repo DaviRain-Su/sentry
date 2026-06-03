@@ -227,17 +227,22 @@ Required row details:
 
 ### H. Venue Accounts / Integrations
 
-Purpose: make future multi-venue work understandable.
+Purpose: make the Local Agent control plane understandable and operable.
 
 Required modules:
 
 - linked Sui wallet;
 - MoveGate/Sentry policy object;
-- cloud agent address;
+- OWS vault status, wallet ids, CAIP accounts and policy token scope;
 - local daemon status;
-- future Hyperliquid agent wallet;
-- future CEX trade-only key;
+- Worker bridge status: local-only / pairing / online / stale / offline / revoked;
+- Sentry local secret store status;
+- Hyperliquid agent wallet / subaccount;
+- CEX trade-only key handles;
+- withdrawal permission proof disabled;
+- asset inventory sync sources and stale data warnings;
 - capability list per venue;
+- remote command status: requested / local-approved / local-blocked / expired;
 - reauth/revoke buttons.
 
 ## 4. Design brief
@@ -283,6 +288,10 @@ Ask design to produce these screens first:
 - Make "real vs simulated" states obvious.
 - Add "coming soon" strategy catalog section, even if only current strategy can deploy.
 - Add real tx/order details to the transaction drawer.
+- Make Local Agent the default run mode.
+- Add OWS vault, exchange key, venue account and asset source panels to Profile / Wallet.
+- Add CLI pairing and Worker bridge status to Profile / Wallet.
+- Label Cloud Worker as optional Sui Testnet runtime, not the production custody path.
 
 ### P1: show product breadth without overbuilding execution
 
@@ -310,7 +319,8 @@ Reasoning:
 
 - ChainDataProvider and GraphQL migration.
 - Seal/Walrus private strategy records.
-- SignerAdapter / local daemon / WaaP-style external signer.
+- SignerRouter / local daemon / OWS signer / WaaP-style external signer.
+- Sentry local secret store for CEX and perps API key handles.
 - Cross-venue inventory rebalancing.
 - Strategy marketplace with copy/follow and vault-like UX.
 

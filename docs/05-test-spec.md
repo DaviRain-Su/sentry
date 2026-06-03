@@ -355,16 +355,31 @@ Passing criteria:
 - No step requires exposing a user private key to the Agent.
 - The deployed agent address shown in preview matches the agent recorded in the Mandate and Wrapper.
 
-## 9. Post-MVP Local CLI Daemon Tests
+## 9. Local Agent CLI and Worker Bridge Tests
 
 These tests are not MVP gates, but they define the composability target.
 
-- `sentry daemon run` loads local agent config and starts periodic ticks.
-- `sentry daemon status` shows agent address, chain, registered adapters and watched policies.
-- daemon uses the same Runtime Core and ExecutorAdapter registry as Cloud Agent.
+- `sentry agent init` creates `~/.sentry`, local identity metadata, state DB and logs with strict file permissions.
+- `sentry agent run` loads local agent config, starts loopback API and starts periodic ticks.
+- `sentry agent status` shows agent id, bridge status, chain, registered adapters and watched policies.
+- daemon uses the same Runtime Core and ExecutorAdapter registry as the optional Worker demo path.
 - daemon refuses to run when the local agent address does not match the Policy Mandate agent.
 - daemon writes local activity logs and can recover after restart without double-submitting an already confirmed action.
 - daemon supports external signer mode before any Mainnet policy is accepted.
+- `sentry agent pair <pairing_code>` rejects expired, reused or owner-mismatched pairing codes.
+- Worker stores only agent public key, owner binding, device metadata and capabilities after pairing.
+- AgentSession Durable Object accepts a WebSocket only after a signed `hello` envelope validates.
+- heartbeat marks an agent `online`, then `stale` after the configured heartbeat timeout, then `offline` after disconnect/expiry.
+- Worker/DO deploy or WebSocket disconnect does not stop the local tick loop.
+- reconnect sends last seen sequence and replays only non-expired queued commands.
+- duplicate remote commands return the prior result by idempotency key.
+- expired remote commands return `COMMAND_EXPIRED` and must not execute.
+- remote `inventory.sync`, `policy.pause`, `policy.resume`, `policy.revoke` and `emergency.stop` commands produce `command_ack` and `command_result`.
+- remote `agent.start` launches the configured external Agent child process and relays bounded stdout/stderr as untrusted output.
+- remote `agent.stop` terminates the external Agent child process without stopping the daemon bridge.
+- remote commands never carry OWS token, wallet passphrase, private key, exchange raw API secret or full local DB rows.
+- revoked pairing closes the bridge and daemon refuses future remote commands while allowing local-only status if configured.
+- Worker compromised simulation cannot bypass local policy scope, credential scope, Guardian or owner approval checks.
 
 ## 10. Open Test Decisions
 
@@ -374,3 +389,4 @@ Before implementation starts, resolve and update `docs/03-technical-spec.md` if 
 - Exact zkLogin SDK flow and test provider.
 - Exact Deepbook call shape for the selected pool.
 - Exact adapter package boundary between Worker and future CLI daemon.
+- Exact Worker bridge pairing auth, relay token refresh and AgentSession storage schema.

@@ -4,6 +4,19 @@
 
 A running snapshot of what is built and how it was verified. Demo-facing summary for judges / handoff.
 
+## Product direction update (2026-06-03)
+
+Production direction is now **Agent dispatch platform**. The Sentry daemon manages policies, Guardian checks, and dispatches tasks to external Agents (Claude Code / Codex / Kimi). The daemon does NOT execute trades itself — external Agents use local toolchains (OWS, Solana CLI, wallets) for signing and execution.
+
+New planning/frontend work:
+
+- `docs/10-local-agent-openwallet.md` records the Open Wallet Standard assessment.
+- `docs/11-local-agent-worker-bridge.md` records the CLI daemon, Agent dispatch protocol, pairing, Cloudflare Worker bridge, and AgentSession Durable Object.
+- `docs/02-architecture.md` updated to Agent dispatch architecture.
+- `docs/01-prd.md` updated to Agent dispatch model.
+- Profile / Wallet now exposes a daemon control plane: OWS vault, Worker bridge, registered Agents, venue accounts and asset sources.
+- New Strategy defaults to Local (daemon + Agent dispatch) and labels Remote Worker as the optional Sui Testnet path.
+
 ## What ships
 
 | Layer | Status | Verified by |
@@ -15,6 +28,12 @@ A running snapshot of what is built and how it was verified. Demo-facing summary
 | **Frontend ↔ Worker contract** | ✅ wired | live reads are Worker-first with direct-chain fallback; create/revoke use Worker-built unsigned txs |
 | **Live write loop** (create / list / revoke) | ✅ **verified on-chain** | real policy created (`9SQWkBne…`) + revoked (`Gzniih…`); endpoints return live data; post-revoke reads `Revoked` |
 | **Live execution** (Deepbook order) | 🟡 gated | builders + dry-run; blocked on testnet DBUSDC funding |
+| **Local Agent daemon** | 🟡 skeleton | `agent/` Node daemon can connect to Worker and manage one external child process over stdio |
+| **Agent dispatch protocol** | 🟡 skeleton | AgentTask/AgentTaskResult types + stdio dispatch path in daemon; Claude Code / Codex child process support started |
+| **Local Agent Worker bridge** | 🟡 skeleton | Worker daemon auth + AgentSession WebSocket/status/command endpoints started; not production auth |
+| **External Agent process manager** | 🟡 skeleton | `agent.start` / `agent.stop` command path exists for Claude Code / Codex-style child processes |
+| **OWS integration** | 🔴 planned | architecture/spec assessed; package not wired into runtime yet |
+| **Exchange API key store** | 🔴 planned | local secret-store contract documented; no keyring implementation yet |
 
 ## On-chain (testnet)
 
@@ -43,6 +62,7 @@ So create / list / activity / revoke are real on testnet. In the browser, a conn
 
 ## Known gaps / next
 
+0. **Agent dispatch implementation** — production direction is Agent dispatch platform. The repo has a first Worker bridge + `agent/` daemon skeleton, but does not yet: (a) remove self-execution ExecutorAdapter code from daemon, (b) fully implement AgentTask/AgentTaskResult dispatch protocol, (c) implement subprocess/stdio dispatch for Claude Code/Codex/Kimi, (d) add Agent registry and capability matrix.
 1. **DBUSDC funding** — the only true remaining gap, and **self-funding is confirmed impossible** on this testnet: DBUSDC `mint` is TreasuryCap-gated (cap not public), DEEP `mint` returns `FunctionNotFound` on the current package, and a SUI→DBUSDC swap needs DEEP for taker fees (a zero-DEEP swap fills 0 even with a live bid). Needs an **external DBUSDC source** (DeepBook-team faucet, or an address that already holds DBUSDC/DEEP). Once the agent BalanceManager holds DBUSDC: flip `EXECUTION_ENABLED=true` and replay the execution PTB (`worker/src/deepbook.js` `buildExecutionTx`).
 2. **Browser wallet click-through** — connect Slush (testnet) and run create/revoke from the UI against `VITE_WORKER_URL` (the on-chain txs above prove the underlying Worker path; the current UI now uses Worker-built txs again).
 3. **zkLogin live test** (optional) — only if using Enoki instead of a wallet.

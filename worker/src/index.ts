@@ -20,6 +20,7 @@ import {
 import { getClient, DEPLOYMENT } from './sui-tx.js';
 import { runTick, validateExecutionPlan } from './tick.js';
 import { validateForceTrigger, validateTickAuthorization } from './tick-auth.js';
+import { validateDaemonAuth } from './daemon-auth.js';
 import {
   buildFundingReadiness,
   parseIntentWithStability,
@@ -39,10 +40,12 @@ import type { ParseDefaults, Strategy } from './types.js';
 
 export interface Env {
   AGENT_RUNTIME: DurableObjectNamespace;
+  AGENT_SESSIONS: DurableObjectNamespace;
   // secrets (wrangler secret / .dev.vars): OWNER_KEY, AGENT_KEY, INTERNAL_AGENT_TICK_TOKEN
   OWNER_KEY?: string;
   AGENT_KEY?: string;
   INTERNAL_AGENT_TICK_TOKEN?: string;
+  DAEMON_AUTH_TOKEN?: string;
   SENTRY_DEMO_MODE?: string;
   EXECUTION_ENABLED?: string;
   REQUIRED_DBUSDC_BALANCE?: string;
@@ -393,6 +396,46 @@ app.get('/api/activity', async (c) => {
       502
     );
   }
+});
+
+// ── Local Agent bridge: daemon status, WebSocket and command relay ─────────
+app.get('/api/local-agents/:agent_id', async (c) => {
+  const agentId = c.req.param('agent_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(`https://agent-session/${encodeURIComponent(agentId)}/state`);
+  return c.json(await res.json(), res.status as 200);
+});
+
+app.get('/api/local-agents/:agent_id/connect', async (c) => {
+  const auth = validateDaemonAuth({ req: c.req.raw, expectedToken: c.env.DAEMON_AUTH_TOKEN });
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  if (c.req.header('Upgrade')?.toLowerCase() !== 'websocket') {
+    return c.json(
+      { status: 'error', code: 'WEBSOCKET_REQUIRED', message: 'WebSocket upgrade required.' },
+      426
+    );
+  }
+  const agentId = c.req.param('agent_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  return stub.fetch(c.req.raw);
+});
+
+app.post('/api/local-agents/:agent_id/commands', async (c) => {
+  const auth = validateDaemonAuth({ req: c.req.raw, expectedToken: c.env.DAEMON_AUTH_TOKEN });
+  if (!auth.ok) return c.json(auth.body, auth.status);
+  let body: { type?: string; payload?: Record<string, unknown>; idempotency_key?: string } = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid JSON body.' }, 400);
+  }
+  const agentId = c.req.param('agent_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(`https://agent-session/${encodeURIComponent(agentId)}/commands`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return c.json(await res.json(), res.status as 200);
 });
 
 // ── D5: build the owner-signed revoke tx (frontend zkLogin signs) ─────────
@@ -752,5 +795,192 @@ export class AgentRuntime {
       await this.state.storage.put('errorCount', n);
     }
     return { status: 'ok', ...result };
+  }
+}
+
+type AgentSessionMessage = {
+  kind?: string;
+  message_id?: string;
+  idempotency_key?: string;
+  issued_at?: string;
+  payload?: Record<string, any>;
+};
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function randomId(prefix: string): string {
+  return `${prefix}_${crypto.randomUUID()}`;
+}
+
+export class AgentSession {
+  state: DurableObjectState;
+  env: Env;
+  socket: WebSocket | null = null;
+
+  constructor(state: DurableObjectState, env: Env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    if (url.pathname.endsWith('/state')) return this.status();
+    if (url.pathname.endsWith('/commands') && req.method === 'POST') {
+      const body = await req.json<Record<string, any>>();
+      return this.enqueueCommand(body);
+    }
+    if (req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+      return this.acceptWebSocket(req);
+    }
+    return jsonResponse({ status: 'error', code: 'NOT_FOUND' }, 404);
+  }
+
+  async status(): Promise<Response> {
+    const lastHeartbeatMs = (await this.state.storage.get<number>('lastHeartbeatMs')) ?? null;
+    const connected = Boolean(this.socket);
+    const ageMs = lastHeartbeatMs ? Date.now() - lastHeartbeatMs : null;
+    const sessionStatus = connected
+      ? ageMs !== null && ageMs > 90_000
+        ? 'stale'
+        : 'online'
+      : lastHeartbeatMs
+        ? 'offline'
+        : 'never_connected';
+    return jsonResponse({
+      status: 'ok',
+      agent_id: (await this.state.storage.get<string>('agentId')) ?? null,
+      session_status: sessionStatus,
+      connected,
+      last_heartbeat_ms: lastHeartbeatMs,
+      last_seen_at: lastHeartbeatMs ? new Date(lastHeartbeatMs).toISOString() : null,
+      last_status: (await this.state.storage.get('lastStatus')) ?? null,
+      active_process: (await this.state.storage.get('activeProcess')) ?? null,
+      command_count: (await this.state.storage.get<number>('commandCount')) ?? 0,
+      last_command: (await this.state.storage.get('lastCommand')) ?? null,
+      last_result: (await this.state.storage.get('lastResult')) ?? null,
+    });
+  }
+
+  async acceptWebSocket(req: Request): Promise<Response> {
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    const url = new URL(req.url);
+    const parts = url.pathname.split('/').filter(Boolean);
+    const agentIdIndex = parts.indexOf('local-agents') + 1;
+    const agentId =
+      agentIdIndex > 0 && parts[agentIdIndex] ? decodeURIComponent(parts[agentIdIndex]) : 'default';
+    this.socket = server;
+    server.accept();
+    await this.state.storage.put('agentId', agentId);
+    await this.state.storage.put('connectedAtMs', Date.now());
+    await this.state.storage.put('lastHeartbeatMs', Date.now());
+    server.addEventListener('message', (event) => {
+      this.handleMessage(String(event.data)).catch((e) => {
+        this.send({
+          kind: 'error',
+          message_id: randomId('err'),
+          issued_at: nowIso(),
+          payload: { code: 'MESSAGE_HANDLER_FAILED', message: String((e as Error).message) },
+        });
+      });
+    });
+    server.addEventListener('close', () => {
+      this.socket = null;
+      this.state.storage.put('disconnectedAtMs', Date.now());
+    });
+    this.send({
+      kind: 'session_accepted',
+      message_id: randomId('msg'),
+      issued_at: nowIso(),
+      payload: { agent_id: agentId },
+    });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async handleMessage(raw: string): Promise<void> {
+    let msg: AgentSessionMessage;
+    try {
+      msg = JSON.parse(raw) as AgentSessionMessage;
+    } catch {
+      this.send({
+        kind: 'error',
+        message_id: randomId('err'),
+        issued_at: nowIso(),
+        payload: { code: 'BAD_JSON', message: 'Invalid bridge JSON message.' },
+      });
+      return;
+    }
+    if (msg.kind === 'hello' || msg.kind === 'heartbeat' || msg.kind === 'agent.status') {
+      await this.state.storage.put('lastHeartbeatMs', Date.now());
+      await this.state.storage.put('lastStatus', msg.payload ?? {});
+      if (msg.payload?.active_process) {
+        await this.state.storage.put('activeProcess', msg.payload.active_process);
+      }
+      return;
+    }
+    if (msg.kind === 'command_result') {
+      await this.state.storage.put('lastResult', {
+        received_at: nowIso(),
+        message_id: msg.message_id ?? null,
+        idempotency_key: msg.idempotency_key ?? null,
+        payload: msg.payload ?? {},
+      });
+      return;
+    }
+    await this.state.storage.put('lastMessage', {
+      received_at: nowIso(),
+      kind: msg.kind ?? 'unknown',
+      payload: msg.payload ?? {},
+    });
+  }
+
+  async enqueueCommand(body: Record<string, any>): Promise<Response> {
+    const type = String(body.type ?? '');
+    if (!type) {
+      return jsonResponse(
+        { status: 'error', code: 'BAD_REQUEST', message: 'command type required.' },
+        400
+      );
+    }
+    const allowed = new Set(['agent.status', 'agent.start', 'agent.stop']);
+    if (!allowed.has(type)) {
+      return jsonResponse(
+        { status: 'error', code: 'UNSUPPORTED_REMOTE_COMMAND', message: `Unsupported: ${type}` },
+        422
+      );
+    }
+    if (!this.socket) {
+      return jsonResponse(
+        { status: 'error', code: 'AGENT_OFFLINE', message: 'Local daemon is not connected.' },
+        409
+      );
+    }
+    const command = {
+      kind: 'command',
+      message_id: randomId('cmd'),
+      issued_at: nowIso(),
+      expires_at: new Date(Date.now() + 120_000).toISOString(),
+      idempotency_key: String(body.idempotency_key || crypto.randomUUID()),
+      payload: { type, ...(body.payload && typeof body.payload === 'object' ? body.payload : {}) },
+    };
+    this.send(command);
+    const n = ((await this.state.storage.get<number>('commandCount')) ?? 0) + 1;
+    await this.state.storage.put('commandCount', n);
+    await this.state.storage.put('lastCommand', command);
+    return jsonResponse({ status: 'ok', queued: true, command });
+  }
+
+  send(message: Record<string, unknown>) {
+    this.socket?.send(JSON.stringify(message));
   }
 }

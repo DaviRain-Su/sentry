@@ -430,7 +430,7 @@ export function PoolDrawer({ pool, onClose, onDeploy }) {
 }
 
 export function AgentRuntimeDrawer({ mode, onClose, onToast }) {
-  const [tab, setTab] = useState(mode || 'cloud');
+  const [tab, setTab] = useState(mode || 'local');
   const r = RG.runtimes[tab];
   const ST = { online: ['var(--safe)', 'online'], offline: ['var(--t2)', 'offline'] };
   const st = ST[r.status] || ST.offline;
@@ -523,7 +523,7 @@ export function AgentRuntimeDrawer({ mode, onClose, onToast }) {
               padding: 4,
             }}
           >
-            {['cloud', 'local'].map((m) => (
+            {['local', 'cloud'].map((m) => (
               <button
                 key={m}
                 onClick={() => setTab(m)}
