@@ -12,44 +12,44 @@ export function attachMarketData(RG) {
   RG.parsedFundingArb = {
     intent: 'Delta-neutral funding arbitrage',
     summary:
-      'Capture the funding-rate spread on a perp: long the venue with the cheapest funding and short an equal-size position on the most expensive, staying market-neutral. The agent rebalances both legs every funding window and bridges collateral across chains automatically.',
+      'Capture the funding-rate spread between Hyperliquid and OKX: long the cheaper funding venue and short an equal-size position on the more expensive venue, staying market-neutral. The local daemon keeps both venue keys local and asks Guardian to re-check the spread every funding window.',
     params: [
-      { k: 'Pair', v: 'SUI-PERP' },
-      { k: 'Legs', v: 'Long Hyperliquid · Short Aevo' },
+      { k: 'Pair', v: 'BTC-PERP' },
+      { k: 'Legs', v: 'Long Hyperliquid · Short OKX' },
       { k: 'Edge', v: '+13.6% APR' },
       { k: 'Notional', v: '≤ 1,000 USDC / leg' },
       { k: 'Rebalance', v: 'every 8h funding' },
     ],
     ptb: [
       {
-        op: 'MoveCall',
-        fn: 'policy::assert_within_budget',
-        args: 'cap=2000, spent=Σ',
-        note: 'budget ceiling across both legs',
+        op: 'LocalGuard',
+        fn: 'guardian.assert_budget',
+        args: 'cap=2000 USDC, venue_limits=OKX+Hyperliquid',
+        note: 'budget ceiling across both venue legs',
       },
       {
-        op: 'MoveCall',
-        fn: 'bluefin::open_position',
-        args: 'mkt=SUI-PERP, side=short, sz=Δ',
-        note: 'short the high-funding venue (Sui)',
+        op: 'VenueAction',
+        fn: 'okx.place_order',
+        args: 'inst=BTC-USDT-SWAP, side=short, sz=Δ, reduce_only=false',
+        note: 'short the high-funding venue with a trade-only key',
       },
       {
-        op: 'Bridge',
-        fn: 'debridge::send',
-        args: 'to=Hyperliquid, asset=USDC, amt=col',
-        note: 'auto cross-chain collateral for the long leg',
+        op: 'VenueAction',
+        fn: 'hyperliquid.place_order',
+        args: 'coin=BTC, side=long, sz=Δ, cloid=sentry-*',
+        note: 'long the low-funding venue through an agent wallet',
       },
       {
-        op: 'MoveCall',
-        fn: 'policy::assert_delta_neutral',
-        args: 'net_delta ≈ 0',
-        note: 'aborts if the two legs drift off-neutral',
+        op: 'LocalGuard',
+        fn: 'guardian.assert_delta_neutral',
+        args: 'net_delta≈0, liq_buffer>=25%, funding_flip>=0',
+        note: 'rejects if the two legs drift off-neutral',
       },
       {
-        op: 'MoveCall',
-        fn: 'policy::log_activity',
-        args: 'agent=0x7a3f, action="funding-arb"',
-        note: 'on-chain activity log',
+        op: 'AuditLog',
+        fn: 'activity.record',
+        args: 'venues=OKX+Hyperliquid, action=funding-arb',
+        note: 'local + Worker activity evidence, no raw secrets',
       },
     ],
     guardian: [
@@ -65,21 +65,21 @@ export function attachMarketData(RG) {
       },
       {
         level: 'warn',
-        label: 'Cross-chain settlement',
+        label: 'Venue enforcement',
         detail:
-          'Bridging via deBridge adds latency; the agent holds a buffer and re-checks the spread after the bridge confirms.',
+          'OKX and Hyperliquid enforce venue-side limits, not a Sentry on-chain vault. Withdrawal keys are never accepted.',
       },
       {
         level: 'pass',
         label: 'Budget ceiling',
-        detail: 'Policy hard-caps total collateral at 2,000 USDC on-chain.',
+        detail: 'Local Guardian and venue limits cap total collateral at 2,000 USDC.',
       },
     ],
     meta: {
-      name: 'SUI-PERP Funding Arb',
+      name: 'BTC-PERP Funding Arb',
       strategy: 'funding-arb',
       budget: 2000,
-      scope: 'SUI-PERP',
+      scope: 'BTC-PERP',
       slip: 0.5,
     },
     backtest: {
@@ -271,7 +271,7 @@ export function attachMarketData(RG) {
       'Buy an asset on the cheapest venue and sell it on the richest across centralized exchanges and on-chain DEXes, capturing the price spread. The agent pre-positions inventory on both sides and bridges between chains so each leg is funded.',
     params: [
       { k: 'Asset', v: 'SUI spot' },
-      { k: 'Legs', v: 'Buy OKX · Sell Raydium' },
+      { k: 'Legs', v: 'Buy OKX · Sell Raydium/Uniswap' },
       { k: 'Spread', v: '+0.19%' },
       { k: 'Size', v: '≤ 2,000 USDC' },
       { k: 'Trigger', v: 'spread > 0.10%' },
@@ -299,7 +299,7 @@ export function attachMarketData(RG) {
         op: 'MoveCall',
         fn: 'raydium::market_sell',
         args: 'SUI/USDC, sz=Δ',
-        note: 'sell the rich venue',
+        note: 'sell the rich venue (Solana or Ethereum)',
       },
       {
         op: 'MoveCall',
@@ -319,7 +319,7 @@ export function attachMarketData(RG) {
         level: 'warn',
         label: 'Inventory & latency',
         detail:
-          'Cross-venue legs are not atomic; the agent pre-positions inventory on both sides to avoid one-leg risk.',
+          'Cross-venue legs are not atomic; the agent pre-positions inventory on OKX, Solana and Ethereum before execution.',
       },
       {
         level: 'warn',
@@ -792,11 +792,10 @@ export function attachMarketData(RG) {
 
   // chains to aggregate — all live; the monitor filters by chain
   RG.chains = [
-    { id: 'sui', name: 'Sui', live: true, c: '#5AA6FF' },
-    { id: 'aptos', name: 'Aptos', live: true, c: '#11C3A6' },
+    { id: 'sui', name: 'Sui Demo', live: true, c: '#5AA6FF' },
     { id: 'solana', name: 'Solana', live: true, c: '#9945FF' },
     { id: 'ethereum', name: 'Ethereum', live: true, c: '#7B8BFF' },
-    { id: 'base', name: 'Base', live: true, c: '#3C7DFF' },
+    { id: 'hyperliquid', name: 'Hyperliquid', live: false, c: '#7CF5D0' },
   ];
 
   // protocol metadata (monogram color + category)
@@ -829,10 +828,8 @@ export function attachMarketData(RG) {
     pendle: { name: 'Pendle', kind: 'Yield', c: '#1FC7A6' },
     curve: { name: 'Curve', kind: 'Stable AMM', c: '#5BD15B' },
     uniswap: { name: 'Uniswap', kind: 'AMM DEX', c: '#FF4DA6' },
-    // Base
-    aerodrome: { name: 'Aerodrome', kind: 'AMM DEX', c: '#2D7DFF' },
-    moonwell: { name: 'Moonwell', kind: 'Lending', c: '#F4B731' },
-    morpho: { name: 'Morpho', kind: 'Lending', c: '#2B6EF2' },
+    // Hyperliquid
+    hyperliquid: { name: 'Hyperliquid', kind: 'Perps · Spot', c: '#7CF5D0' },
   };
 
   // yield opportunities across chains — base APY + reward APY, TVL ($M), 7d trend, risk

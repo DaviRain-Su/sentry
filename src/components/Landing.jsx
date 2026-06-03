@@ -38,7 +38,7 @@ const FEATURES = [
   {
     p: <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9z" />,
     t: 'Natural-language intent',
-    s: 'Describe a strategy in a sentence; get a human-readable PTB you can audit before signing.',
+    s: 'Describe a venue strategy in a sentence; get a readable action plan before any agent acts.',
   },
   {
     p: (
@@ -48,17 +48,17 @@ const FEATURES = [
       </>
     ),
     t: 'Guardian risk engine',
-    s: 'Catches slippage, capital concentration, stale pools and budget breaches — and can block.',
+    s: 'Catches slippage, leverage, funding flips, stale markets and budget breaches before dispatch.',
   },
   {
     p: <path d="M13 2L4 14h6l-1 8 9-12h-6z" />,
-    t: 'Real Deepbook execution',
-    s: 'Limit orders placed on Deepbook v3 — actual on-chain trades, not simulated fills.',
+    t: 'Hyperliquid + OKX target',
+    s: 'Uses agent wallets, trade-only keys, subaccounts and venue-side controls, never withdrawal keys.',
   },
   {
     p: <path d="M3 12h4l2 6 4-14 2 8h6" />,
-    t: 'On-chain activity log',
-    s: "Every autonomous decision is recorded on-chain with the agent's reasoning and tx hash.",
+    t: 'Activity evidence',
+    s: 'Records local command, venue order id, Guardian result and Worker bridge status for audit.',
   },
   {
     p: (
@@ -67,8 +67,8 @@ const FEATURES = [
         <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3" />
       </>
     ),
-    t: 'Local-first or cloud',
-    s: 'Run decisions on your own LLM for privacy, or a Cloudflare Worker for 24/7 always-on.',
+    t: 'Local-first daemon',
+    s: 'Run the control process on your machine; Worker relays sessions and dashboard commands.',
   },
   {
     p: (
@@ -78,7 +78,7 @@ const FEATURES = [
       </>
     ),
     t: 'Revoke any time',
-    s: "Owner revocation deletes the agent's authority on-chain, instantly. You're always in control.",
+    s: 'Stop the daemon, rotate the venue key, revoke the OWS policy or close the Worker session.',
   },
 ];
 
@@ -86,22 +86,22 @@ const STEPS = [
   {
     n: '01',
     t: 'Describe in plain language',
-    s: '"When SUI drops 8%, deploy a 500 USDC rescue grid." The agent parses it into a readable PTB.',
+    s: '"Long Hyperliquid and short OKX BTC-PERP when funding spread clears 8% APR."',
   },
   {
     n: '02',
     t: 'Guardian checks the risk',
-    s: 'Slippage, concentration, pool freshness and budget are reviewed before you ever confirm.',
+    s: 'Budget, venue scope, liquidation buffer, funding flip and withdrawal safety are checked.',
   },
   {
     n: '03',
-    t: 'Sign the Policy Object',
-    s: 'One signature mints an on-chain leash: budget cap, scope, slippage, expiry. The agent gets nothing more.',
+    t: 'Pair local authorization',
+    s: 'The daemon reads OWS policy refs and OS-keychain venue handles; raw secrets never go to Worker.',
   },
   {
     n: '04',
-    t: 'It monitors & rescues',
-    s: 'Local or cloud, the agent watches 24/7 and executes on Deepbook within limits — logging every action.',
+    t: 'It monitors and dispatches',
+    s: 'The daemon starts external agents, sends typed tasks and records venue evidence after execution.',
   },
 ];
 
@@ -187,7 +187,7 @@ export function Landing({ onLaunch }) {
           </div>
           <div className="lp-nav-links">
             <a href="#how">How it works</a>
-            <a href="#why">Why Sui</a>
+            <a href="#why">Why local</a>
             <a href="#features">Features</a>
             <a href="#tracks">Tracks</a>
           </div>
@@ -201,17 +201,17 @@ export function Landing({ onLaunch }) {
           <div className="hero-grid">
             <div>
               <div className="badge badge-accent reveal" style={{ marginBottom: 22 }}>
-                <span className="dot pulse"></span>Sui Overflow 2026 · Agentic Web
+                <span className="dot pulse"></span>Local Agent · Hyperliquid + OKX
               </div>
               <h1 className="h1 reveal">
-                Autonomous DeFi rescue,
+                Autonomous trading control,
                 <br />
-                on a <span style={{ color: 'var(--accent)' }}>leash you control</span>.
+                with <span style={{ color: 'var(--accent)' }}>keys that stay local</span>.
               </h1>
               <p className="lead reveal">
-                Sentry is an AI agent that monitors your positions, decides, and executes real
-                trades on Deepbook — strictly inside a Move Policy Object you authorize once. Truly
-                autonomous, never able to go rogue.
+                Sentry pairs a local daemon with external coding agents, OWS wallets and trade-only
+                venue keys. It monitors Hyperliquid, OKX, Solana and Ethereum, then executes only
+                after Guardian passes budget, venue and withdrawal-safety checks.
               </p>
               <div className="cta-row reveal">
                 <a href="#" onClick={launch} className="btn btn-primary btn-lg">
@@ -224,20 +224,20 @@ export function Landing({ onLaunch }) {
               <div className="kpi-strip reveal">
                 <div>
                   <div className="k mono">1</div>
-                  <div className="l">signature to authorize</div>
+                  <div className="l">local daemon to pair</div>
                 </div>
                 <div>
                   <div className="k mono">0</div>
-                  <div className="l">signatures to execute</div>
+                  <div className="l">raw secrets in cloud</div>
                 </div>
                 <div>
                   <div className="k mono">100%</div>
-                  <div className="l">on-chain auditable</div>
+                  <div className="l">venue evidence logged</div>
                 </div>
               </div>
             </div>
 
-            {/* hero visual: the rescue grid catching a crash */}
+            {/* hero visual: the bounded action loop */}
             <div className="reveal">
               <div className="lp-card" style={{ padding: 22 }}>
                 <div
@@ -457,9 +457,9 @@ export function Landing({ onLaunch }) {
             }}
           >
             <div className="eyebrow reveal">How it works</div>
-            <h2 className="sec-title reveal">Authorize once. Then it runs itself.</h2>
+            <h2 className="sec-title reveal">Pair locally. Then bound the blast radius.</h2>
             <p className="sec-sub reveal">
-              A single Move Policy Object turns intent into bounded autonomy.
+              The daemon keeps keys local while Worker relays dashboard commands and status.
             </p>
           </div>
           <div className="step-grid reveal" style={{ marginTop: 46 }}>
@@ -477,7 +477,7 @@ export function Landing({ onLaunch }) {
           </div>
         </section>
 
-        {/* WHY SUI */}
+        {/* WHY LOCAL */}
         <section className="blk wrap" id="why">
           <div
             className="lp-card reveal"
@@ -490,18 +490,17 @@ export function Landing({ onLaunch }) {
           >
             <div style={{ padding: 46 }}>
               <div className="badge badge-sui" style={{ marginBottom: 18 }}>
-                Why Sui
+                Why local
               </div>
               <h2 className="sec-title" style={{ fontSize: 32 }}>
-                The Move Policy Object
+                The local daemon
                 <br />
-                is the whole point.
+                is the trust boundary.
               </h2>
               <p style={{ color: 'var(--t1)', fontSize: 15, marginTop: 16, lineHeight: 1.6 }}>
-                On Sui, authority is an{' '}
-                <strong style={{ color: 'var(--t0)' }}>object you own</strong>. Sentry gives the
-                agent a scoped capability — never your keys. Limits aren't a promise in our backend;
-                they're enforced by Move at execution time.
+                Production Sentry should not send wallet secrets or exchange API keys to cloud
+                infrastructure. The daemon runs on the user's machine, stores only local key
+                handles, and lets Worker relay typed commands and status.
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 24 }}>
                 {[
@@ -509,19 +508,19 @@ export function Landing({ onLaunch }) {
                     <strong key="s" style={{ color: 'var(--t0)' }}>
                       Self-enforced budget
                     </strong>,
-                    ' — the agent asserts remaining budget on-chain before every order.',
+                    ' — Guardian checks budget before every venue task.',
                   ],
                   [
                     <strong key="s" style={{ color: 'var(--t0)' }}>
-                      Any Sui wallet
+                      Trade-only venues
                     </strong>,
-                    ' — authorize with one signature; the agent gets a scoped capability, never your keys.',
+                    ' — OKX and Hyperliquid keys never include withdrawal scope.',
                   ],
                   [
                     <strong key="s" style={{ color: 'var(--t0)' }}>
-                      Revocable instantly
+                      Revocable locally
                     </strong>,
-                    " — delete the object and the agent's power is gone, on-chain.",
+                    ' — stop the daemon, rotate keys, revoke OWS policies or close Worker sessions.',
                   ],
                 ].map((row, i) => (
                   <div key={i} style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
@@ -684,8 +683,8 @@ export function Landing({ onLaunch }) {
               gap: 14,
             }}
           >
-            <div className="eyebrow reveal">Sui Overflow 2026 · Agentic Web</div>
-            <h2 className="sec-title reveal">Built across three sub-tracks.</h2>
+            <div className="eyebrow reveal">Production target · local first</div>
+            <h2 className="sec-title reveal">Built around three control surfaces.</h2>
           </div>
           <div className="track-grid reveal" style={{ marginTop: 46 }}>
             <div className="lp-card" style={{ borderColor: 'var(--accent)' }}>
@@ -694,11 +693,11 @@ export function Landing({ onLaunch }) {
               >
                 <span className="badge badge-accent">Primary</span>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--t2)' }}>
-                  Sub-track 2
+                  Local
                 </span>
               </div>
               <h3 className="display" style={{ fontSize: 17, fontWeight: 600, marginTop: 14 }}>
-                Autonomous Agent Wallet
+                Local Agent Daemon
               </h3>
               <ul
                 style={{
@@ -710,10 +709,10 @@ export function Landing({ onLaunch }) {
                 }}
               >
                 {[
-                  'Real Deepbook order execution',
-                  'Self-enforced budget ceiling',
-                  'On-chain activity log',
-                  'Owner revocation',
+                  'Outbound Worker bridge',
+                  'External Agent lifecycle',
+                  'Typed command dispatch',
+                  'Status and activity sync',
                 ].map((x) => (
                   <li key={x} style={{ fontSize: 12.5, color: 'var(--t1)' }}>
                     ✓ {x}
@@ -727,11 +726,11 @@ export function Landing({ onLaunch }) {
               >
                 <span className="badge badge-sui">Fused</span>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--t2)' }}>
-                  Sub-track 3
+                  Venues
                 </span>
               </div>
               <h3 className="display" style={{ fontSize: 17, fontWeight: 600, marginTop: 14 }}>
-                Intent Engine
+                Authorization Adapters
               </h3>
               <ul
                 style={{
@@ -743,10 +742,10 @@ export function Landing({ onLaunch }) {
                 }}
               >
                 {[
-                  'Natural language → PTB',
-                  'Human-readable preview',
-                  'Guardian: 4 risk classes',
-                  'Explicit confirm step',
+                  'Hyperliquid agent wallet',
+                  'OKX trade-only key',
+                  'OWS wallet references',
+                  'No withdrawal credentials',
                 ].map((x) => (
                   <li key={x} style={{ fontSize: 12.5, color: 'var(--t1)' }}>
                     ✓ {x}
@@ -760,11 +759,11 @@ export function Landing({ onLaunch }) {
               >
                 <span className="badge badge-neutral">Touched</span>
                 <span className="mono" style={{ fontSize: 11, color: 'var(--t2)' }}>
-                  Sub-track 1
+                  Guardian
                 </span>
               </div>
               <h3 className="display" style={{ fontSize: 17, fontWeight: 600, marginTop: 14 }}>
-                Risk Guardian
+                Risk And Inventory
               </h3>
               <ul
                 style={{
@@ -775,13 +774,15 @@ export function Landing({ onLaunch }) {
                   gap: 8,
                 }}
               >
-                {['Live price monitoring', 'AI risk score', 'Autonomous rescue trigger'].map(
-                  (x) => (
-                    <li key={x} style={{ fontSize: 12.5, color: 'var(--t1)' }}>
-                      ✓ {x}
-                    </li>
-                  )
-                )}
+                {[
+                  'Local inventory snapshot',
+                  'Funding and liquidation checks',
+                  'Budget preflight',
+                ].map((x) => (
+                  <li key={x} style={{ fontSize: 12.5, color: 'var(--t1)' }}>
+                    ✓ {x}
+                  </li>
+                ))}
               </ul>
             </div>
           </div>
@@ -799,11 +800,11 @@ export function Landing({ onLaunch }) {
             }}
           >
             <h2 className="sec-title" style={{ fontSize: 36 }}>
-              See the rescue happen live.
+              Run the local-agent path.
             </h2>
             <p className="sec-sub" style={{ margin: '14px auto 0' }}>
-              Open the dashboard and trigger a flash crash — watch the agent buy the dip inside
-              policy, no signature required.
+              Open the dashboard, inspect the daemon bridge, and create a Hyperliquid/OKX funding
+              strategy with local credentials and venue-scoped guards.
             </p>
             <div
               style={{
@@ -818,7 +819,7 @@ export function Landing({ onLaunch }) {
                 Launch Sentry
               </a>
               <a href="#" onClick={launch} className="btn btn-lg">
-                Try the flash-crash demo
+                Try the local demo
               </a>
             </div>
           </div>
@@ -862,7 +863,7 @@ export function Landing({ onLaunch }) {
               </span>
             </div>
             <div className="mono" style={{ fontSize: 12, color: 'var(--t2)' }}>
-              Sui wallet · Move Policy Object · PTB · Deepbook v3 · Cloudflare Workers
+              Local daemon · OWS vault · Hyperliquid · OKX · Cloudflare Workers
             </div>
           </div>
         </footer>

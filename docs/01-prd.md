@@ -16,12 +16,23 @@ Sentry 是一个 **Local Agent 调度平台**。它不是自己执行交易的 A
 
 核心叙事是:用户无需把钱包私钥或交易所 withdrawal key 交给云端服务;Sentinel 守护程序自己不碰私钥,而是调度本机已有的 Agent 工具(Claude Code / Codex / Kimi)在策略约束内行动。守护程序是"大脑"(策略 + 风控 + 调度),外部 Agent 是"手"(执行 + 签名)。
 
+### 2026-06-03 target integration scope
+
+新的生产目标范围先收敛为四类 venue:
+
+- **Solana**:目标链之一。优先复用 OWS / Solana wallet / native delegation / Sigil / Squads 等既有授权原语;只有在预算递减、策略状态或 receipt 无法由现有机制表达时,才考虑写 Sentry Anchor program。
+- **Ethereum**:目标链之一。优先使用 smart account module、Safe guard、session key 或 account abstraction 约束;只有现有模块无法表达预算、scope、expiry、revoke、audit claim 时才写自定义 Solidity。
+- **Hyperliquid**:目标 perps/spot venue 之一。优先使用 Hyperliquid API wallet / agent wallet、subaccount、vault 和 venue-side order controls;不写 Sentry 链上合约,也不宣称 chain-enforced。
+- **OKX**:第一个交易所集成。只支持 read + trade API key、subaccount、IP allowlist 和 venue-side limits;明确禁止 withdrawal key,也不声称 chain-enforced。
+
+**Sui Testnet** 继续作为已验证 demo 路径保留,用于 MoveGate + SentryPolicyWrapper + DeepBook 闭环展示;它不是当前生产目标集成列表的一部分。
+
 ### 2026-06-03 Agent dispatch architecture
 
 Sentry 的生产架构是 Agent 调度平台:
 
 - **守护程序(Sentry daemon)**:管理策略、Tick 监控、Guardian 风险检查、Agent 调度、Activity 日志。不自行执行交易。
-- **外部 Agent**:Claude Code、Codex、Kimi 等本地 Agent 工具。守护程序向它们分发任务("在 Solana 上 swap 100 USDC"),外部 Agent 使用本机已有的钱包/OWS/CLI 环境签名执行。
+- **外部 Agent**:Claude Code、Codex、Kimi 等本地 Agent 工具。守护程序向它们分发任务("在 Solana 上 swap 100 USDC"、"在 OKX 下一个 trade-only order"),外部 Agent 使用本机已有的钱包/OWS/CLI/keychain 环境签名或下单。
 - **Worker bridge**:CLI daemon 主动通过 outbound WebSocket 连接 Cloudflare Worker / AgentSession Durable Object,用于远程状态展示和命令中继。
 - **链上策略约束**:MoveGate(Sui)、Sigil(Solana)、ERC-8004(Ethereum)等链上授权基础设施,确保 Agent 不越权。
 - **本机环境**:OWS vault、OS keychain/keyring、Solana CLI、各种钱包工具--这些由外部 Agent 直接使用,Sentry 守护程序不代理也不保存。
@@ -30,9 +41,9 @@ Sentry 的生产架构是 Agent 调度平台:
 
 "链上约束 + Agent 自主执行"赛道已有 MoveGate(Sui)、Sigil(Solana)、ERC-8004(Ethereum)等项目。Sentry 不重新发明 Agent 授权协议。它基于 **MoveGate Mandate** 复用已经过测试覆盖验证的链上授权基础设施(Agent 身份、可撤销授权、hot-potato AuthToken、不可变审计轨迹),在此之上叠加 DeFi 风险响应垂直场景:自然语言策略解析、Guardian 风险检查、Deepbook 执行和 zkLogin 无密码登录,集成到一个完整可演示闭环中。
 
-差异化组合:Agent 调度平台 × 策略引擎 × Guardian 风控 × 链上约束执行 × 自然语言意图 × 零云端 custody。
+差异化组合:Agent 调度平台 × 策略引擎 × Guardian 风控 × 链上授权/记账约束 × 自然语言意图 × 零云端 custody。
 
-Sentry 自身不写交易执行代码。DAO 守护程序负责策略 + 风控 + 调度,具体交易的构建和签名由外部 Agent(Claude Code / Codex / Kimi)使用本机已有工具链完成。
+Sentry 自身不写交易执行代码。Sentry 守护程序负责策略 + 风控 + 调度,具体交易的构建和签名由外部 Agent(Claude Code / Codex / Kimi)使用本机已有工具链完成。
 
 ## 2. 问题与机会
 
@@ -44,7 +55,7 @@ Sentry 自身不写交易执行代码。DAO 守护程序负责策略 + 风控 + 
 
 Sui 的对象模型、PTB、zkLogin 和 Deepbook 让 Sentry 可以把"安全授权"和"自主执行"放在同一个可演示闭环里。后续接入 Cetus DLMM、Scallop、Kai 或类似 LeafSheep/CDPM 的仓位管理协议时,应复用同一套 Policy、Guardian、Runtime 和 Activity 边界,只替换或新增 ExecutorAdapter。
 
-更长期的多链、多 venue、CEX、Hyperliquid、跨链结算和再平衡路线,不进入黑客松 MVP;规划见 [`docs/06-post-mvp-multivenue-roadmap.md`](06-post-mvp-multivenue-roadmap.md)。该路线的核心原则是统一策略、权限、风控和执行接口,而不是强行把所有链和交易所伪装成一个底层账户。
+更长期的多链、多 venue、CEX、跨链结算和再平衡路线,不进入黑客松 MVP;当前生产目标 slice 先锁定 Solana、Ethereum、Hyperliquid 和 OKX,规划见 [`docs/06-post-mvp-multivenue-roadmap.md`](06-post-mvp-multivenue-roadmap.md)。该路线的核心原则是统一策略、权限、风控和执行接口,而不是强行把所有链和交易所伪装成一个底层账户。
 
 ## 3. 目标用户
 
@@ -130,7 +141,7 @@ Hackathon 视角的成功指标:
 - 不在 MVP 承诺 Mainnet 资金执行。
 - 不在当前代码中承诺完整本地 daemon 已实现。本文档锁定 Local Agent-first 产品方向和接口边界。
 - Local Agent 与现有 Worker demo 共享 PolicyReader、Guardian、ExecutorAdapter 和 ActivityWriter 边界,但生产 custody 默认只走本地。
-- 不在 MVP 承诺多交易所、多链、跨链桥、CEX、Hyperliquid 或复杂组合保证金管理;这些属于 Post-MVP multivenue roadmap,见 [`docs/06-post-mvp-multivenue-roadmap.md`](06-post-mvp-multivenue-roadmap.md)。
+- Sui Testnet hackathon MVP 不承诺多交易所、多链、跨链桥、CEX 或复杂组合保证金管理;生产目标 slice 单独推进 Solana、Ethereum、Hyperliquid 和 OKX,见 [`docs/06-post-mvp-multivenue-roadmap.md`](06-post-mvp-multivenue-roadmap.md)。
 - 不在 MVP 承诺自动生成任意 PTB;仅支持 Sentry 已知策略模板。
 - 不在 MVP 承诺法律、投资建议或收益保证。
 

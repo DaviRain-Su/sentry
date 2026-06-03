@@ -2,7 +2,7 @@
 
 > Cross-chain autonomous risk agent — set your policy, Sentry patrols the chains.
 
-Sentry is an Agent dispatch platform — a local daemon that watches your positions across blockchains, exchanges, and perps venues, runs Guardian policy checks, and dispatches structured tasks to external Agents (Claude Code, Codex, Kimi) for execution. You set the rules, the daemon dispatches the work. External Agents use your local toolchain (OWS vault, wallets, Solana CLI) — private keys never leave your machine and never touch the daemon.
+Sentry is an Agent dispatch platform — a local daemon that watches your positions across blockchains, perps venues, and exchanges, runs Guardian policy checks, and dispatches structured tasks to external Agents (Claude Code, Codex, Kimi) for execution. You set the rules, the daemon dispatches the work. External Agents use your local toolchain (OWS vault, wallets, Solana/Ethereum CLIs, exchange/perps APIs) — private keys never leave your machine and never touch the daemon.
 
 ## Origin
 
@@ -12,13 +12,16 @@ React dashboard, and a Cloudflare Worker runtime. The verified Sui Testnet path 
 for demos, but the product direction is now an **Agent dispatch platform**: a local daemon that
 dispatches tasks to external Agents instead of executing trades itself.
 
-The long-term vision is cross-chain: one local control plane, one policy language, one Guardian,
-one activity ledger — with external Agents doing the actual execution using the user's local
-toolchain. Chain wallets handled through OWS; exchange credentials stay in local keychain as
-read + trade keys, never withdrawal keys. See the
+The target production slice is Solana, Ethereum, Hyperliquid, and OKX, with Sui Testnet
+kept as the verified demo path. The long-term vision is cross-chain: one local control plane,
+one policy language, one Guardian, one activity ledger — with external Agents doing the actual
+execution using the user's local toolchain. Chain wallets are handled through OWS or native
+wallet tooling; OKX credentials stay in local keychain as read + trade keys, never withdrawal
+keys. See the
 [Local Agent + Open Wallet plan](docs/10-local-agent-openwallet.md) and
 [Local Agent, Agent Dispatch & Worker Bridge](docs/11-local-agent-worker-bridge.md), plus the
-[Multivenue Roadmap](docs/06-post-mvp-multivenue-roadmap.md).
+[Multivenue Roadmap](docs/06-post-mvp-multivenue-roadmap.md) and
+[Authorization Adapter Model](docs/13-authorization-adapters.md).
 
 ## Quickstart
 
@@ -40,9 +43,131 @@ npm install && npm run dev -- --host localhost --port 5175
 Local daemon bridge skeleton:
 
 ```bash
-cd worker && DAEMON_AUTH_TOKEN=sk_daemon_dev npm run dev
-cd agent && node src/index.mjs --token sk_daemon_dev --worker-url http://localhost:8787 --agent-cmd "codex"
+cd worker && npm run dev -- --port 8787
+curl -sS -X POST http://localhost:8787/api/local-agents/pairing | jq .
+cd agent && node src/index.mjs --pairing-code <pairing_code> --worker-url http://localhost:8787 --agent-cmd "codex"
 ```
+
+Local venue key metadata:
+
+```bash
+cd agent
+node src/index.mjs agent register codex --command "codex" \
+  --capabilities read_context,return_evidence
+node src/index.mjs agent list
+node src/index.mjs agent probe codex --json
+node src/index.mjs venue add --venue okx --key-handle okx_key_xxxx \
+  --account-ref okx:subaccount:sentry-main \
+  --permissions read,place_order,cancel_order \
+  --ip-allowlist true
+node src/index.mjs venue add --venue hyperliquid --key-handle hl_agent_xxxx \
+  --account-ref hyperliquid:subaccount:sentry-main \
+  --read-account-address 0x0000000000000000000000000000000000000000 \
+  --agent-wallet-address 0x1111111111111111111111111111111111111111 \
+  --permissions read,place_order,cancel_order,set_leverage
+node src/index.mjs venue list
+node src/index.mjs venue credentials status --venue okx --key-handle okx_key_xxxx
+node src/index.mjs venue credentials store --venue okx --key-handle okx_key_xxxx
+node src/index.mjs signer probe --scope solana-mainnet,ethereum-mainnet --json
+node src/index.mjs activity tail --json
+node src/index.mjs policy add --policy-id funding-arb-1 \
+  --target-venues hyperliquid,okx \
+  --target-agent codex
+node src/index.mjs policy list
+node src/index.mjs policy tick --json
+node src/index.mjs policy plan --json
+node src/index.mjs policy run-once --check-readiness --json
+# daemon mode only: start periodic preflight loop, still no dispatch unless explicit
+node src/index.mjs --relay-token dev_relay --policy-loop --policy-loop-check-readiness
+```
+
+This writes metadata only to `~/.sentry/venues.json` or `--venue-config <path>`. Raw OKX /
+Hyperliquid secrets stay in OS keychain or the user's external-agent environment. On macOS,
+`venue credentials store` uses the system `security` prompt to write OKX credentials without
+accepting raw secret values as CLI flags; `venue credentials status` checks env/keychain presence
+without revealing values.
+The OKX read-only adapter can build and sign API v5 balance requests and normalize balance
+responses under test. For explicit live reads, the daemon first resolves OKX credentials from local
+environment variables such as `SENTRY_OKX_API_KEY`, `SENTRY_OKX_SECRET_KEY` and
+`SENTRY_OKX_PASSPHRASE`, or key-handle-specific variants like
+`SENTRY_OKX_OKX_KEY_XXXX_API_KEY`, then falls back to macOS Keychain. These values are never
+persisted to `~/.sentry` or sent to Worker.
+`core/okx-trade.js` adds the first trade-task skeleton for OKX: it builds and validates
+`place_order` AgentTasks for spot `cash` mode, rejects withdrawal scope, normalizes OKX order
+responses into `AgentTaskResult` evidence, builds order-status queries, and verifies venue order id
+/ client order id before the dispatcher accepts a submitted result. The daemon has a mock-tested OKX
+order-status fetch adapter and dispatch receipt verifier, so `agent.dispatch` can enrich an OKX
+submitted result with venue order state before returning. OKX is still not globally
+dispatch-ready in the Worker registry, but the local daemon can now mark a specific OKX
+`place_order` task dispatch-ready when linked key metadata proves `read` + `place_order`, no
+`withdraw`, `ip_allowlist=true`, and local env/keychain credentials resolve. Production UI wiring
+and stronger venue-side permission proof are still pending.
+Hyperliquid read-only sync uses its public `info` endpoint and requires the actual master or
+subaccount address via `--read-account-address` or `SENTRY_HYPERLIQUID_USER_ADDRESS`; do not use an
+agent-wallet address for account state reads.
+`core/hyperliquid-trade.js` adds the first Hyperliquid perps order task skeleton: it builds and
+validates `place_order` AgentTasks, requires `read` + `place_order`, rejects withdrawal/transfer
+scope, uses a 128-bit `cloid` as idempotency evidence, normalizes accepted/filled order responses
+and lets the dispatcher reject mismatched `cloid`, coin or venue evidence. The daemon also has a
+read-only Hyperliquid `orderStatus` adapter, `userRole` agent-wallet live checker and dispatch
+receipt verifier, so `agent.dispatch` can confirm the configured agent wallet is still linked to the
+expected master/subaccount, then enrich a submitted Hyperliquid result with sanitized order state. It
+can also submit an external Agent-produced pre-signed `/exchange` payload, then verify the resulting
+order state. It does not sign inside the daemon, and Hyperliquid still stays out of global
+`ready_for_dispatch` until production UI wiring and end-to-end live-account dry-runs are complete.
+Hyperliquid live reads, live grant checks, signed-submit POSTs and order-status checks use bounded
+retry/backoff for HTTP 429 / 5xx and sanitized retry summaries. The daemon persists local
+signed-submit nonce claims by default in `~/.sentry/hyperliquid-nonces.json` and blocks duplicate
+`authorization_ref + nonce` reuse across restarts; use `SENTRY_HYPERLIQUID_NONCE_STORE` or
+`--hyperliquid-nonce-store <path>` to override the path.
+The local daemon can also mark a specific Hyperliquid `place_order` task dispatch-ready when linked
+metadata proves `read` + `place_order`, no `withdraw` / `transfer`, and an actual master/subaccount
+read address plus active agent-wallet grant metadata are configured. Remote daemon `agent.dispatch`
+defaults to checking Hyperliquid public `info.userRole` before external-agent dispatch and before
+receipt verification; direct unit calls can leave this disabled for offline tests. That local
+override does not imply daemon-held signing keys or Worker global dispatch readiness.
+Solana and Ethereum live inventory reads are also local-only and read-only. Set
+`SENTRY_SOLANA_WALLET_ADDRESS` plus optional `SENTRY_SOLANA_RPC_URL`, and
+`SENTRY_ETHEREUM_WALLET_ADDRESS` plus optional `SENTRY_ETHEREUM_RPC_URL` and
+`SENTRY_ETHEREUM_TOKENS` (`SYMBOL:ADDRESS:DECIMALS,...`) before requesting an explicit live
+inventory sync. These reads never give the daemon signing authority.
+`core/solana-trade.js` adds the first Solana swap task skeleton for external Agents: it builds a
+`submit_tx` AgentTask for Jupiter/Raydium/Orca-style swaps, requires `read + sign + submit_tx`,
+rejects withdrawal scope, carries quote id as idempotency evidence and verifies returned Solana
+transaction signatures before dispatcher acceptance. It does not build, sign, simulate or submit the
+transaction inside the daemon. `agent/src/solana-receipt-adapter.mjs` can poll Solana
+`getSignatureStatuses` after an external Agent returns a signature and attach sanitized receipt
+verification to `agent.dispatch`.
+`core/ethereum-trade.js` adds the matching Ethereum swap task skeleton for external Agents: it
+builds a `submit_tx` AgentTask for Uniswap/Safe/ERC-4337-style execution, requires `read`, `sign`
+and `submit_tx`, rejects withdrawal scope, carries quote id as idempotency evidence and verifies
+returned EVM transaction hashes before dispatcher acceptance. It does not install a Safe module,
+grant a session key, build calldata, sign, simulate or submit inside the daemon.
+`agent/src/ethereum-receipt-adapter.mjs` can poll `eth_getTransactionReceipt` after an external
+Agent returns a transaction hash and attach sanitized receipt verification to `agent.dispatch`.
+For both Solana and Ethereum, the daemon can create a task-local dispatch-ready override only when
+the task account matches the locally configured wallet address env and the task requests
+`read/sign/submit_tx`. `agent/src/local-signer-probe.mjs` adds a non-signing local signer/address
+probe: set `SENTRY_SOLANA_SIGNER_ADDRESS` or `SENTRY_SOLANA_SIGNER_PROBE_COMMAND`, and
+`SENTRY_ETHEREUM_SIGNER_ADDRESS` or `SENTRY_ETHEREUM_SIGNER_PROBE_COMMAND`, then run
+`sentry-daemon signer probe`. This proves address alignment only; it is not OWS account discovery,
+real signature probing, transaction construction, or Worker global `ready_for_dispatch`.
+`agent/src/local-activity-log.mjs` now writes sanitized daemon dispatch activity to
+`~/.sentry/activity.jsonl` by default, records blocked and completed `agent.dispatch` attempts, and
+exposes local CLI / remote `activity.tail` reads without returning raw secret-shaped fields.
+`agent/src/local-policy-store.mjs` now provides the first local PolicyManager storage layer:
+`~/.sentry/policies.json`, `sentry-daemon policy add/list/pause/resume/revoke`, and a due-policy
+`policy tick` snapshot. `agent/src/local-policy-task-planner.mjs` can turn due policies with
+explicit `task_template(s)` into planned AgentTasks for OKX, Hyperliquid, Solana and Ethereum via
+`sentry-daemon policy plan`. `agent/src/local-policy-runner.mjs` adds a guarded `policy run-once`
+path that can preflight local policy scope/readiness and, only with `--dispatch`, send tasks to a
+registered external Agent. `agent/src/local-policy-loop.mjs` adds a daemon-owned periodic loop
+controller (`--policy-loop`, remote start/stop/status/run_now) that repeatedly invokes the guarded
+runner and can mark ticks. It still defaults to no dispatch and is not a production-complete
+Guardian loop for live accounts.
+`agent/src/local-agent-capability-probe.mjs` adds a local `agent probe` / remote `agent.probe`
+surface that runs registered Agents with `--version`, checks declared baseline capabilities, and
+returns bounded metadata only.
 
 ## How It Works
 
@@ -73,10 +198,11 @@ local wallets and keys — the daemon never touches private keys.
 
 ## Architecture
 
-Sentry is built in three planes:
+Sentry is built around three runtime planes plus an explicit authorization model:
 
 - **Control Plane** — the Sentry Account, strategy mandates, Guardian decisions, emergency stop, and activity ledger. This is chain-agnostic.
-- **Execution Plane** — one adapter per venue/protocol. Currently: Sui/DeepBook demo. Planned: Solana/Jupiter, EVM/Safe, Hyperliquid, OKX, Binance.
+- **Authorization Model** — one AuthorizationAdapter per venue account: OWS local policy, native delegation, smart account module, Sentry contract, or venue API key. The UI must show whether enforcement is local, chain, venue, or hybrid.
+- **Execution Plane** — one adapter per venue/protocol. Currently: Sui/DeepBook demo, a shared target venue catalog, read-only inventory adapters for Solana, Ethereum, Hyperliquid and OKX, OKX `place_order` AgentTask/result verifier, order-status adapter and daemon receipt verifier, Hyperliquid `place_order` AgentTask/result verifier, local agent-wallet grant metadata gate, public `userRole` live checker, pre-signed exchange-submit adapter, local nonce store, order-status adapter and daemon receipt verifier skeleton, plus Solana and Ethereum `submit_tx` swap AgentTask/result verifier, env-account local dispatch-ready gate, non-signing local signer/address probe and RPC receipt polling skeletons. Production trade execution remains planned for daemon-side Solana/Ethereum transaction construction, simulation/signing handoff, live receipt dry-runs, and Hyperliquid live-account dry-runs/UI wiring.
 - **Settlement Plane** — moves inventory between venues (LI.FI, deBridge, native transfers). Modeled as sagas, not atomic transactions.
 
 ```
@@ -88,11 +214,13 @@ Sentry Account (chain-agnostic identity)
   │   ├── normalized asset inventory
   │   └── Worker bridge client
   ├── venue accounts
-  │   ├── sui: MoveGate Mandate + SentryPolicyWrapper
-  │   ├── solana: delegated PDA account         ← next
-  │   ├── evm: Safe module / ERC-4337           ← planned
-  │   ├── hyperliquid: API wallet + subaccount  ← planned
-  │   └── okx/binance: trade-only API key       ← planned
+  │   ├── sui: MoveGate Mandate + SentryPolicyWrapper (chain accounting)
+  │   ├── solana: native delegation / delegated PDA    ← target
+  │   ├── ethereum: Safe module / ERC-4337 session key ← target
+  │   ├── hyperliquid: API wallet + subaccount         ← target
+  │   └── okx: trade-only API key + subaccount         ← first exchange
+  ├── authorization adapters
+  │   └── local / chain / venue / hybrid enforcement metadata
   ├── strategy mandates
   └── unified activity ledger
 ```
@@ -104,7 +232,7 @@ Build status: [`docs/STATUS.md`](docs/STATUS.md).
 
 - **Vite + React** (JSX) with TanStack Query, Router, Table, and Form
 - **Cloudflare Worker** (Hono) with Durable Objects for per-policy runtime and bridge relay
-- **Local daemon** — Node.js CLI + loopback API + Agent dispatch to external Agents (stdio)
+- **Local daemon** — Node.js CLI + Agent dispatch to external Agents (stdio) + sanitized local activity JSONL
 - **External Agents** — Claude Code, Codex, Kimi (user-installed; daemon dispatches tasks)
 - **Local signing** — OWS wallet vault, OS keychain (used by external Agents, not by daemon)
 - **`core/`** — shared SDK-agnostic logic (strategy hash, intent parser, Guardian)
@@ -131,7 +259,15 @@ core/
   guardian.js               # Guardian decision logic
   deployment.js             # on-chain ids / constants
 agent/
-  src/index.mjs             # local daemon bridge + external Agent process manager skeleton
+  src/index.mjs             # local daemon bridge + typed remote commands
+  src/local-agent-registry.mjs # registered external Agent metadata
+  src/local-agent-capability-probe.mjs # command/version + declared capability probe
+  src/local-policy-store.mjs # local policy metadata + due tick selection
+  src/local-policy-task-planner.mjs # due policy task_template(s) -> planned AgentTasks
+  src/local-policy-runner.mjs # guarded run-once preflight/readiness/dispatch
+  src/local-policy-loop.mjs # daemon-owned periodic policy loop controller
+  src/agent-dispatcher.mjs  # AgentTask -> subprocess stdin -> AgentTaskResult stdout
+  src/local-activity-log.mjs # sanitized local dispatch activity JSONL + tail
 ```
 
 ## Docs
@@ -139,7 +275,8 @@ agent/
 - [Architecture](docs/02-architecture.md)
 - [Local Agent + Open Wallet Plan](docs/10-local-agent-openwallet.md)
 - [Local Agent, Agent Dispatch & Worker Bridge](docs/11-local-agent-worker-bridge.md)
-- [Multivenue Roadmap](docs/06-post-mvp-multivenue-roadmap.md) — Solana, EVM, CEX, settlement
+- [Authorization Adapter Model](docs/13-authorization-adapters.md)
+- [Multivenue Roadmap](docs/06-post-mvp-multivenue-roadmap.md) — Solana, Ethereum, Hyperliquid, OKX, settlement
 - [Build Status](docs/STATUS.md)
 - [Technical Spec](docs/03-technical-spec.md)
 - [Market & Product Roadmap](docs/09-market-product-and-frontend-roadmap.md)

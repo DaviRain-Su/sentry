@@ -20,7 +20,13 @@ import {
 import { getClient, DEPLOYMENT } from './sui-tx.js';
 import { runTick, validateExecutionPlan } from './tick.js';
 import { validateForceTrigger, validateTickAuthorization } from './tick-auth.js';
-import { validateDaemonAuth } from './daemon-auth.js';
+import {
+  authErrorResponse,
+  checkToken,
+  randomToken,
+  sha256Hex,
+  tokenFromRequest,
+} from './daemon-auth.js';
 import {
   buildFundingReadiness,
   parseIntentWithStability,
@@ -37,6 +43,16 @@ import {
 import { AGENT_ADDRESS } from './config.js';
 import { DEFAULT_TICK_INTERVAL_SECONDS } from './config.js';
 import type { ParseDefaults, Strategy } from './types.js';
+import { getAuthorizationRegistrySnapshot } from '../../core/authorization.js';
+import { getVenueCatalogSnapshot } from '../../core/venues.js';
+import {
+  applyCommandResult,
+  commandIdFromPath,
+  commandRecordFromMessage,
+  type AgentCommandRecord,
+  rememberCommandRecord,
+} from './agent-session-command-records.js';
+import { isAllowedLocalAgentCommand } from './local-agent-commands.js';
 
 export interface Env {
   AGENT_RUNTIME: DurableObjectNamespace;
@@ -45,7 +61,6 @@ export interface Env {
   OWNER_KEY?: string;
   AGENT_KEY?: string;
   INTERNAL_AGENT_TICK_TOKEN?: string;
-  DAEMON_AUTH_TOKEN?: string;
   SENTRY_DEMO_MODE?: string;
   EXECUTION_ENABLED?: string;
   REQUIRED_DBUSDC_BALANCE?: string;
@@ -55,6 +70,9 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>();
 const PARSE_CACHE_MAX_ENTRIES = 200;
+const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
+const RELAY_TOKEN_TTL_MS = 30 * 60 * 1000;
+const OWNER_CONTROL_TOKEN_TTL_MS = 30 * 60 * 1000;
 const parseCache = new Map<string, Record<string, unknown>>();
 function setParseCache(key: string, value: Record<string, unknown>) {
   if (parseCache.size >= PARSE_CACHE_MAX_ENTRIES) {
@@ -107,6 +125,10 @@ app.use('/api/*', cors());
 app.use('/api/*', bodyLimit({ maxSize: 50 * 1024 }));
 
 app.get('/', (c) => c.json({ service: 'sentry-worker', agent: AGENT_ADDRESS, status: 'ok' }));
+
+app.get('/api/venues/catalog', (c) => c.json(getVenueCatalogSnapshot()));
+
+app.get('/api/authorization/registry', (c) => c.json(getAuthorizationRegistrySnapshot()));
 
 // ── E2: parse natural-language intent into a structured strategy ──────────
 app.post('/api/intents/parse', async (c) => {
@@ -399,6 +421,95 @@ app.get('/api/activity', async (c) => {
 });
 
 // ── Local Agent bridge: daemon status, WebSocket and command relay ─────────
+app.post('/api/local-agents/pairing', async (c) => {
+  let body: { owner?: string; device_label?: string } = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    /* body is optional for local dev */
+  }
+  const pairingCode = randomToken('pair');
+  const ownerControlToken = randomToken('oct');
+  const expiresAtMs = Date.now() + PAIRING_CODE_TTL_MS;
+  const ownerControlTokenExpiresAtMs = Date.now() + OWNER_CONTROL_TOKEN_TTL_MS;
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(`pairing:${pairingCode}`));
+  const res = await stub.fetch('https://agent-session/pairing/init', {
+    method: 'POST',
+    body: JSON.stringify({
+      pairing_code: pairingCode,
+      owner: body.owner || 'dev-owner',
+      device_label: body.device_label || null,
+      expires_at_ms: expiresAtMs,
+      owner_control_token_hash: await sha256Hex(ownerControlToken),
+      owner_control_token_expires_at_ms: ownerControlTokenExpiresAtMs,
+    }),
+  });
+  if (!res.ok) return c.json(await res.json(), res.status as 500);
+  return c.json({
+    status: 'ok',
+    pairing_code: pairingCode,
+    expires_at: new Date(expiresAtMs).toISOString(),
+    owner_control_token: ownerControlToken,
+    owner_control_token_expires_at: new Date(ownerControlTokenExpiresAtMs).toISOString(),
+    pair_url: '/api/local-agents/pair',
+  });
+});
+
+app.post('/api/local-agents/pair', async (c) => {
+  let body: {
+    pairing_code?: string;
+    agent_id?: string;
+    device_name?: string;
+    supported_capabilities?: string[];
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid JSON body.' }, 400);
+  }
+  const pairingCode = body.pairing_code?.trim();
+  if (!pairingCode) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'pairing_code required.' }, 400);
+  }
+  const pairingStub = c.env.AGENT_SESSIONS.get(
+    c.env.AGENT_SESSIONS.idFromName(`pairing:${pairingCode}`)
+  );
+  const consumed = await pairingStub.fetch('https://agent-session/pairing/consume', {
+    method: 'POST',
+    body: JSON.stringify({ pairing_code: pairingCode }),
+  });
+  const consumedBody = await consumed.json<Record<string, any>>();
+  if (!consumed.ok) return c.json(consumedBody, consumed.status as 400);
+
+  const agentId = body.agent_id?.trim() || randomToken('agent');
+  const relayToken = randomToken('rt');
+  const relayTokenExpiresAtMs = Date.now() + RELAY_TOKEN_TTL_MS;
+  const sessionStub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const paired = await sessionStub.fetch('https://agent-session/pair', {
+    method: 'POST',
+    body: JSON.stringify({
+      agent_id: agentId,
+      owner: consumedBody.owner,
+      device_name: body.device_name || consumedBody.device_label || 'local-daemon',
+      supported_capabilities: Array.isArray(body.supported_capabilities)
+        ? body.supported_capabilities
+        : [],
+      relay_token_hash: await sha256Hex(relayToken),
+      relay_token_expires_at_ms: relayTokenExpiresAtMs,
+      owner_control_token_hash: consumedBody.owner_control_token_hash,
+      owner_control_token_expires_at_ms: consumedBody.owner_control_token_expires_at_ms,
+    }),
+  });
+  if (!paired.ok) return c.json(await paired.json(), paired.status as 500);
+  return c.json({
+    status: 'ok',
+    agent_id: agentId,
+    websocket_url: `/api/local-agents/${encodeURIComponent(agentId)}/connect`,
+    relay_token: relayToken,
+    relay_token_expires_at: new Date(relayTokenExpiresAtMs).toISOString(),
+  });
+});
+
 app.get('/api/local-agents/:agent_id', async (c) => {
   const agentId = c.req.param('agent_id');
   const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
@@ -407,8 +518,6 @@ app.get('/api/local-agents/:agent_id', async (c) => {
 });
 
 app.get('/api/local-agents/:agent_id/connect', async (c) => {
-  const auth = validateDaemonAuth({ req: c.req.raw, expectedToken: c.env.DAEMON_AUTH_TOKEN });
-  if (!auth.ok) return c.json(auth.body, auth.status);
   if (c.req.header('Upgrade')?.toLowerCase() !== 'websocket') {
     return c.json(
       { status: 'error', code: 'WEBSOCKET_REQUIRED', message: 'WebSocket upgrade required.' },
@@ -420,9 +529,27 @@ app.get('/api/local-agents/:agent_id/connect', async (c) => {
   return stub.fetch(c.req.raw);
 });
 
+app.get('/api/local-agents/:agent_id/commands', async (c) => {
+  const agentId = c.req.param('agent_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(`https://agent-session/${encodeURIComponent(agentId)}/commands`, {
+    headers: { Authorization: c.req.header('Authorization') || '' },
+  });
+  return c.json(await res.json(), res.status as 200);
+});
+
+app.get('/api/local-agents/:agent_id/commands/:command_id', async (c) => {
+  const agentId = c.req.param('agent_id');
+  const commandId = c.req.param('command_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(
+    `https://agent-session/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(commandId)}`,
+    { headers: { Authorization: c.req.header('Authorization') || '' } }
+  );
+  return c.json(await res.json(), res.status as 200);
+});
+
 app.post('/api/local-agents/:agent_id/commands', async (c) => {
-  const auth = validateDaemonAuth({ req: c.req.raw, expectedToken: c.env.DAEMON_AUTH_TOKEN });
-  if (!auth.ok) return c.json(auth.body, auth.status);
   let body: { type?: string; payload?: Record<string, unknown>; idempotency_key?: string } = {};
   try {
     body = await c.req.json();
@@ -433,6 +560,7 @@ app.post('/api/local-agents/:agent_id/commands', async (c) => {
   const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
   const res = await stub.fetch(`https://agent-session/${encodeURIComponent(agentId)}/commands`, {
     method: 'POST',
+    headers: { Authorization: c.req.header('Authorization') || '' },
     body: JSON.stringify(body),
   });
   return c.json(await res.json(), res.status as 200);
@@ -833,10 +961,29 @@ export class AgentSession {
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    const commandId = commandIdFromPath(url.pathname);
+    if (url.pathname === '/pairing/init' && req.method === 'POST') {
+      const body = await req.json<Record<string, any>>();
+      return this.initPairing(body);
+    }
+    if (url.pathname === '/pairing/consume' && req.method === 'POST') {
+      const body = await req.json<Record<string, any>>();
+      return this.consumePairing(body);
+    }
+    if (url.pathname === '/pair' && req.method === 'POST') {
+      const body = await req.json<Record<string, any>>();
+      return this.pairAgent(body);
+    }
     if (url.pathname.endsWith('/state')) return this.status();
+    if (commandId && req.method === 'GET') {
+      return this.getCommand(req, commandId);
+    }
+    if (url.pathname.endsWith('/commands') && req.method === 'GET') {
+      return this.listCommands(req);
+    }
     if (url.pathname.endsWith('/commands') && req.method === 'POST') {
       const body = await req.json<Record<string, any>>();
-      return this.enqueueCommand(body);
+      return this.enqueueCommand(req, body);
     }
     if (req.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       return this.acceptWebSocket(req);
@@ -846,6 +993,8 @@ export class AgentSession {
 
   async status(): Promise<Response> {
     const lastHeartbeatMs = (await this.state.storage.get<number>('lastHeartbeatMs')) ?? null;
+    const relayTokenExpiresAtMs =
+      (await this.state.storage.get<number>('relayTokenExpiresAtMs')) ?? null;
     const connected = Boolean(this.socket);
     const ageMs = lastHeartbeatMs ? Date.now() - lastHeartbeatMs : null;
     const sessionStatus = connected
@@ -864,13 +1013,177 @@ export class AgentSession {
       last_seen_at: lastHeartbeatMs ? new Date(lastHeartbeatMs).toISOString() : null,
       last_status: (await this.state.storage.get('lastStatus')) ?? null,
       active_process: (await this.state.storage.get('activeProcess')) ?? null,
+      owner: (await this.state.storage.get('owner')) ?? null,
+      device_name: (await this.state.storage.get('deviceName')) ?? null,
+      paired_at: (await this.state.storage.get('pairedAt')) ?? null,
+      relay_token_expires_at: relayTokenExpiresAtMs
+        ? new Date(relayTokenExpiresAtMs).toISOString()
+        : null,
       command_count: (await this.state.storage.get<number>('commandCount')) ?? 0,
       last_command: (await this.state.storage.get('lastCommand')) ?? null,
       last_result: (await this.state.storage.get('lastResult')) ?? null,
+      last_message: (await this.state.storage.get('lastMessage')) ?? null,
     });
   }
 
+  async assertOwner(req: Request): Promise<Response | null> {
+    const ownerCheck = await checkToken({
+      token: tokenFromRequest(req),
+      expectedHash: (await this.state.storage.get<string>('ownerControlTokenHash')) ?? null,
+      expiresAtMs: (await this.state.storage.get<number>('ownerControlTokenExpiresAtMs')) ?? null,
+    });
+    return ownerCheck.ok ? null : authErrorResponse(ownerCheck);
+  }
+
+  async readCommandRecords(): Promise<AgentCommandRecord[]> {
+    const records = (await this.state.storage.get<AgentCommandRecord[]>('commandRecords')) ?? [];
+    return Array.isArray(records) ? records : [];
+  }
+
+  async writeCommandRecords(records: AgentCommandRecord[]): Promise<void> {
+    await this.state.storage.put('commandRecords', records);
+  }
+
+  async rememberCommand(command: Record<string, any>): Promise<AgentCommandRecord> {
+    const records = await this.readCommandRecords();
+    const next = rememberCommandRecord(records, command);
+    const record = commandRecordFromMessage(command);
+    await this.writeCommandRecords(next);
+    await this.state.storage.put('lastCommand', record);
+    return record;
+  }
+
+  async rememberCommandResult(msg: AgentSessionMessage): Promise<void> {
+    const records = await this.readCommandRecords();
+    const next = applyCommandResult(records, msg, nowIso());
+    const changed = next.some((item, index) => item !== records[index]);
+    if (!changed) return;
+    await this.writeCommandRecords(next);
+    const commandId = String(msg.payload?.command_message_id || '');
+    const idempotencyKey = String(msg.idempotency_key || '');
+    const updated = next.find(
+      (item) =>
+        (commandId && item.command_id === commandId) ||
+        (idempotencyKey && item.idempotency_key === idempotencyKey)
+    );
+    if (updated) await this.state.storage.put('lastCommand', updated);
+  }
+
+  async listCommands(req: Request): Promise<Response> {
+    const authError = await this.assertOwner(req);
+    if (authError) return authError;
+    const records = await this.readCommandRecords();
+    return jsonResponse({
+      status: 'ok',
+      command_count: records.length,
+      commands: records,
+    });
+  }
+
+  async getCommand(req: Request, commandId: string): Promise<Response> {
+    const authError = await this.assertOwner(req);
+    if (authError) return authError;
+    const records = await this.readCommandRecords();
+    const command =
+      records.find((item) => item.command_id === commandId || item.idempotency_key === commandId) ??
+      null;
+    if (!command) {
+      return jsonResponse(
+        { status: 'error', code: 'COMMAND_NOT_FOUND', message: 'Command was not found.' },
+        404
+      );
+    }
+    return jsonResponse({ status: 'ok', command });
+  }
+
+  async initPairing(body: Record<string, any>): Promise<Response> {
+    const pairingCode = String(body.pairing_code || '');
+    const expiresAtMs = Number(body.expires_at_ms || 0);
+    if (!pairingCode || !Number.isSafeInteger(expiresAtMs)) {
+      return jsonResponse(
+        { status: 'error', code: 'BAD_REQUEST', message: 'Invalid pairing payload.' },
+        400
+      );
+    }
+    await this.state.storage.put('pairing', {
+      pairing_code: pairingCode,
+      owner: String(body.owner || 'dev-owner'),
+      device_label: body.device_label || null,
+      expires_at_ms: expiresAtMs,
+      owner_control_token_hash: String(body.owner_control_token_hash || ''),
+      owner_control_token_expires_at_ms: Number(body.owner_control_token_expires_at_ms || 0),
+      consumed_at_ms: null,
+    });
+    return jsonResponse({ status: 'ok' });
+  }
+
+  async consumePairing(body: Record<string, any>): Promise<Response> {
+    const expected = String(body.pairing_code || '');
+    const pairing = (await this.state.storage.get<Record<string, any>>('pairing')) ?? null;
+    if (!pairing || pairing.pairing_code !== expected) {
+      return jsonResponse(
+        { status: 'error', code: 'PAIRING_NOT_FOUND', message: 'Pairing code not found.' },
+        404
+      );
+    }
+    if (pairing.consumed_at_ms) {
+      return jsonResponse(
+        { status: 'error', code: 'PAIRING_USED', message: 'Pairing code already used.' },
+        409
+      );
+    }
+    if (Date.now() > Number(pairing.expires_at_ms)) {
+      return jsonResponse(
+        { status: 'error', code: 'PAIRING_EXPIRED', message: 'Pairing code expired.' },
+        410
+      );
+    }
+    pairing.consumed_at_ms = Date.now();
+    await this.state.storage.put('pairing', pairing);
+    return jsonResponse({
+      status: 'ok',
+      owner: pairing.owner,
+      device_label: pairing.device_label,
+      owner_control_token_hash: pairing.owner_control_token_hash,
+      owner_control_token_expires_at_ms: pairing.owner_control_token_expires_at_ms,
+    });
+  }
+
+  async pairAgent(body: Record<string, any>): Promise<Response> {
+    const agentId = String(body.agent_id || '');
+    const relayTokenHash = String(body.relay_token_hash || '');
+    const ownerControlTokenHash = String(body.owner_control_token_hash || '');
+    const relayTokenExpiresAtMs = Number(body.relay_token_expires_at_ms || 0);
+    const ownerControlTokenExpiresAtMs = Number(body.owner_control_token_expires_at_ms || 0);
+    if (!agentId || !relayTokenHash || !ownerControlTokenHash) {
+      return jsonResponse(
+        { status: 'error', code: 'BAD_REQUEST', message: 'Invalid agent pairing payload.' },
+        400
+      );
+    }
+    await this.state.storage.put('agentId', agentId);
+    await this.state.storage.put('owner', String(body.owner || 'dev-owner'));
+    await this.state.storage.put('deviceName', String(body.device_name || 'local-daemon'));
+    await this.state.storage.put(
+      'supportedCapabilities',
+      Array.isArray(body.supported_capabilities) ? body.supported_capabilities : []
+    );
+    await this.state.storage.put('relayTokenHash', relayTokenHash);
+    await this.state.storage.put('relayTokenExpiresAtMs', relayTokenExpiresAtMs);
+    await this.state.storage.put('ownerControlTokenHash', ownerControlTokenHash);
+    await this.state.storage.put('ownerControlTokenExpiresAtMs', ownerControlTokenExpiresAtMs);
+    await this.state.storage.put('pairedAt', nowIso());
+    return jsonResponse({ status: 'ok', agent_id: agentId });
+  }
+
   async acceptWebSocket(req: Request): Promise<Response> {
+    const relayCheck = await checkToken({
+      token: tokenFromRequest(req),
+      expectedHash: (await this.state.storage.get<string>('relayTokenHash')) ?? null,
+      expiresAtMs: (await this.state.storage.get<number>('relayTokenExpiresAtMs')) ?? null,
+    });
+    if (!relayCheck.ok) return authErrorResponse(relayCheck);
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -929,12 +1242,14 @@ export class AgentSession {
       return;
     }
     if (msg.kind === 'command_result') {
-      await this.state.storage.put('lastResult', {
+      const result = {
         received_at: nowIso(),
         message_id: msg.message_id ?? null,
         idempotency_key: msg.idempotency_key ?? null,
         payload: msg.payload ?? {},
-      });
+      };
+      await this.state.storage.put('lastResult', result);
+      await this.rememberCommandResult(msg);
       return;
     }
     await this.state.storage.put('lastMessage', {
@@ -944,7 +1259,10 @@ export class AgentSession {
     });
   }
 
-  async enqueueCommand(body: Record<string, any>): Promise<Response> {
+  async enqueueCommand(req: Request, body: Record<string, any>): Promise<Response> {
+    const authError = await this.assertOwner(req);
+    if (authError) return authError;
+
     const type = String(body.type ?? '');
     if (!type) {
       return jsonResponse(
@@ -952,8 +1270,7 @@ export class AgentSession {
         400
       );
     }
-    const allowed = new Set(['agent.status', 'agent.start', 'agent.stop']);
-    if (!allowed.has(type)) {
+    if (!isAllowedLocalAgentCommand(type)) {
       return jsonResponse(
         { status: 'error', code: 'UNSUPPORTED_REMOTE_COMMAND', message: `Unsupported: ${type}` },
         422
@@ -976,8 +1293,8 @@ export class AgentSession {
     this.send(command);
     const n = ((await this.state.storage.get<number>('commandCount')) ?? 0) + 1;
     await this.state.storage.put('commandCount', n);
-    await this.state.storage.put('lastCommand', command);
-    return jsonResponse({ status: 'ok', queued: true, command });
+    const record = await this.rememberCommand(command);
+    return jsonResponse({ status: 'ok', queued: true, command, command_record: record });
   }
 
   send(message: Record<string, unknown>) {

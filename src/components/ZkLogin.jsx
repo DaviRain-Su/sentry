@@ -67,7 +67,7 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
         </a>
         <div style={{ maxWidth: 520 }}>
           <div className="badge badge-accent" style={{ marginBottom: 22 }}>
-            <span className="dot pulse"></span>Sui Overflow 2026 · Agentic Web
+            <span className="dot pulse"></span>Local Agent · Hyperliquid + OKX
           </div>
           <h1
             className="display"
@@ -85,14 +85,15 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
               maxWidth: 460,
             }}
           >
-            Authorize once with a Move Policy Object. Sentry then monitors, decides and executes
-            real trades on Deepbook — strictly inside the budget and scope you set on-chain.
+            Pair a local daemon, keep venue keys in your OS keychain, and let Sentry dispatch
+            bounded actions to Hyperliquid, OKX, Solana and Ethereum. Sui Testnet remains the
+            verified demo path.
           </p>
           <div style={{ display: 'flex', gap: 26, marginTop: 36 }}>
             {[
-              { k: 'Self-enforced', v: 'budget ceiling' },
-              { k: 'On-chain', v: 'activity log' },
-              { k: 'Revocable', v: 'any time' },
+              { k: 'Local', v: 'secret store' },
+              { k: 'Venue', v: 'trade-only guard' },
+              { k: 'Revocable', v: 'sessions + keys' },
             ].map((x) => (
               <div key={x.k}>
                 <div
@@ -107,7 +108,7 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--t3)', fontFamily: 'var(--f-mono)' }}>
-          Sui wallet · Move Policy Object · PTB · Deepbook v3
+          Local daemon · OWS vault · Hyperliquid · OKX · Worker bridge
         </div>
       </div>
 
@@ -125,8 +126,8 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
             Sign in
           </h2>
           <p style={{ fontSize: 13.5, color: 'var(--t1)', marginTop: 8, marginBottom: 22 }}>
-            Connect a Sui wallet to authorize the agent on-chain. The agent only ever gets a scoped
-            Policy Object — never your keys.
+            Open the local-agent dashboard in demo mode, or connect a Sui wallet for the legacy
+            Testnet signer flow. Production venue keys stay local and are never sent to Worker.
           </p>
 
           {/* Sui wallet — the real, credential-free sign-in */}
@@ -242,13 +243,13 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
             {[
               {
                 n: '1',
-                t: 'Connect, don’t hand over keys',
-                s: 'Your wallet signs once to mint a Move Policy Object. The agent acts only within it and never touches your keys.',
+                t: 'Run the local daemon',
+                s: 'The CLI pairs to Worker over an outbound WebSocket and controls local external agents.',
               },
               {
                 n: '2',
-                t: 'Revoke any time',
-                s: 'Delete the Policy Object and the agent’s authority is gone on-chain, instantly.',
+                t: 'Keep keys local',
+                s: 'OWS wallets and OKX/Hyperliquid trade-only keys stay in local storage or OS keychain.',
               },
             ].map((s) => (
               <div key={s.n} style={{ display: 'flex', gap: 12 }}>

@@ -189,9 +189,129 @@ function statusClass(status) {
   return 'badge-neutral';
 }
 
+function TargetIntegrationMatrix({ catalog }) {
+  if (!catalog) return null;
+  const rows = catalog.target_venues || [
+    ...(catalog.target_chains || []),
+    ...(catalog.target_perps || []),
+    ...(catalog.target_exchanges || []),
+  ];
+  return (
+    <div
+      style={{
+        background: 'var(--glass)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--r-md)',
+        padding: 15,
+        marginBottom: 16,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <div className="card-title">Target integrations</div>
+          <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: 3 }}>
+            Production target: Solana, Ethereum, Hyperliquid and OKX. Sui remains a demo runtime
+            until the new adapters ship.
+          </div>
+        </div>
+        <span className="badge badge-accent" style={{ fontSize: 9 }}>
+          local agent default
+        </span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 800 }}>
+          <thead>
+            <tr style={{ color: 'var(--t2)' }}>
+              {['Target', 'Role', 'Authorization', 'Budget guard', 'Next adapter step'].map((h) => (
+                <th
+                  key={h}
+                  style={{
+                    textAlign: h === 'Target' ? 'left' : 'right',
+                    padding: '7px 8px',
+                    fontSize: 9.5,
+                    fontFamily: 'var(--f-mono)',
+                    fontWeight: 500,
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((v) => (
+              <tr key={v.id} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: '10px 8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: 999,
+                        background: v.color,
+                        boxShadow: `0 0 8px ${v.color}66`,
+                      }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 12.5, fontWeight: 650 }}>{v.name}</div>
+                      <div className="mono" style={{ fontSize: 10, color: 'var(--t2)' }}>
+                        {v.chain_id || 'cex'} · {v.status}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding: '10px 8px', textAlign: 'right', fontSize: 11.5 }}>
+                  {v.role}
+                </td>
+                <td
+                  className="mono"
+                  style={{ padding: '10px 8px', textAlign: 'right', fontSize: 10.5 }}
+                >
+                  {v.authorization_model}
+                </td>
+                <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                  <span
+                    className={`badge ${v.funds_custodied ? 'badge-safe' : v.budget_enforcement === 'venue_limit' ? 'badge-warn' : 'badge-neutral'}`}
+                    style={{ fontSize: 8.5 }}
+                  >
+                    {v.budget_enforcement}
+                  </span>
+                </td>
+                <td
+                  style={{
+                    padding: '10px 8px',
+                    textAlign: 'right',
+                    fontSize: 10.5,
+                    color: 'var(--t2)',
+                    maxWidth: 240,
+                  }}
+                >
+                  {v.required_next?.[0] || v.adapter_status}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function LocalAgentControl({ data, exchanges = [], onToast }) {
   if (!data) return null;
-  const linkedExchanges = exchanges.filter((e) => e.status === 'connected').length;
+  const linkedVenues = data.venues.filter((v) => ['live', 'linked'].includes(v.status)).length;
+  const targetCount = data.targetCatalog?.readiness?.target_count ?? data.venues.length;
   const metric = (label, value, tone = 'var(--t0)') => (
     <div
       style={{
@@ -228,9 +348,9 @@ function LocalAgentControl({ data, exchanges = [], onToast }) {
             Wallet vault, exchange keys and asset inventory
           </h3>
           <div style={{ fontSize: 12, color: 'var(--t2)', marginTop: 5, maxWidth: 690 }}>
-            The local daemon signs through the OWS vault, keeps exchange credentials in the local
-            secret store, connects to the Worker bridge, and builds one normalized inventory before
-            Guardian allows execution.
+            The local daemon signs through the OWS vault, keeps the OKX API key in the local secret
+            store, connects to the Worker bridge, and normalizes Solana, Ethereum, Hyperliquid and
+            OKX inventory before Guardian allows execution.
           </div>
         </div>
         <Button
@@ -258,9 +378,12 @@ function LocalAgentControl({ data, exchanges = [], onToast }) {
       >
         {metric('OWS wallets', data.vault.wallets, 'var(--accent)')}
         {metric('Policy tokens', data.vault.apiTokens, 'var(--safe)')}
-        {metric('Exchange keys', data.secretStore.exchangeKeys, 'var(--warn)')}
-        {metric('Linked venues', linkedExchanges, 'var(--sui)')}
+        {metric('OKX keys', data.secretStore.exchangeKeys, 'var(--warn)')}
+        {metric('Target venues', targetCount, 'var(--sui)')}
+        {metric('Linked/demo', linkedVenues, 'var(--safe)')}
       </div>
+
+      <TargetIntegrationMatrix catalog={data.targetCatalog} />
 
       <div className="rg-2col" style={{ alignItems: 'stretch', marginBottom: 16 }}>
         <div
@@ -453,8 +576,8 @@ function LocalAgentControl({ data, exchanges = [], onToast }) {
               <Icon name="shield" size={14} />
             </span>
             <div style={{ fontSize: 10.5, lineHeight: 1.45, color: 'var(--t1)' }}>
-              OWS API tokens are for wallet signing. Exchange API keys stay separate, trade-only,
-              and are never reused as wallet credentials.
+              OWS API tokens are for Solana/Ethereum wallet signing. OKX API keys stay separate,
+              trade-only, and are never reused as wallet credentials.
             </div>
           </div>
         </div>

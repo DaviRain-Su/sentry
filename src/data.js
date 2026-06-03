@@ -2,6 +2,18 @@
    Sentry — mock data layer
    =========================================================== */
 import { attachMarketData } from './market-data.js';
+import { buildLocalInventorySnapshot, getInventoryAdapterRegistry } from '../core/inventory.js';
+import { buildLocalSecretStoreSnapshot } from '../core/local-secrets.js';
+import {
+  buildAssetSources,
+  buildExchangeAccounts,
+  buildVenueAccounts,
+  getVenueCatalogSnapshot,
+} from '../core/venues.js';
+
+const LOCAL_SECRET_STORE = buildLocalSecretStoreSnapshot();
+const LOCAL_INVENTORY = buildLocalInventorySnapshot({ secretStore: LOCAL_SECRET_STORE });
+const INVENTORY_ADAPTERS = getInventoryAdapterRegistry();
 
 export const RG = {
   user: {
@@ -204,13 +216,13 @@ export const RG = {
 
   // example NL strategies (chips)
   examples: [
-    'When SUI drops more than 8%, deploy a 500 USDC rescue grid',
-    'DCA 100 USDC into DEEP every day for 2 weeks',
-    'Hedge my WAL position if it falls below $0.55',
+    'Run a delta-neutral BTC funding strategy: long Hyperliquid and short OKX, capped at 2,000 USDC',
+    'Monitor Hyperliquid funding every 8h and pause if the spread flips negative',
+    'Arbitrage SOL spot between OKX and Raydium only when spread clears 0.8%',
   ],
 
   // a deliberately risky intent — Guardian will BLOCK it
-  riskyExample: 'Put my entire balance into one SUI grid and ignore slippage',
+  riskyExample: 'Use my whole OKX balance at 20x on Hyperliquid and ignore funding flips',
 
   // the headline scenario — parsed result for the rescue grid intent
   parsed: {
@@ -593,6 +605,7 @@ export const RG = {
     ephemeralKey: 'ed25519 · 0x4c8d…71ab',
     gas: { sponsored: 47, saved: 0.0421, station: 'Sentry Gas Station' },
     localAgent: {
+      targetCatalog: getVenueCatalogSnapshot(),
       vault: {
         standard: 'Open Wallet Standard v1.3',
         path: '~/.ows',
@@ -603,10 +616,11 @@ export const RG = {
         audit: '~/.ows/logs/audit.jsonl',
       },
       secretStore: {
-        path: 'OS keychain + ~/.sentry/secrets',
-        status: 'locked',
-        exchangeKeys: 2,
+        path: `${LOCAL_SECRET_STORE.storage} + ${LOCAL_SECRET_STORE.metadata_path}`,
+        status: LOCAL_SECRET_STORE.status,
+        exchangeKeys: LOCAL_SECRET_STORE.key_count,
         rotation: '30d',
+        rawSecretPolicy: LOCAL_SECRET_STORE.raw_secret_policy,
       },
       bridge: {
         status: 'paired',
@@ -624,118 +638,13 @@ export const RG = {
         { k: 'Withdrawals', v: 'never imported', status: 'blocked' },
         { k: 'Asset inventory', v: 'chain RPC + venue balances', status: 'syncing' },
       ],
-      venues: [
-        {
-          id: 'sui-testnet',
-          name: 'Sui Testnet',
-          kind: 'chain',
-          authority: 'MoveGate wrapper + OWS signer',
-          custody: 'self-custody',
-          assets: 'SUI · DBUSDC · DEEP',
-          status: 'live',
-          permissions: 'sign PTB · read balances',
-        },
-        {
-          id: 'base',
-          name: 'Base / EVM',
-          kind: 'chain',
-          authority: 'OWS EVM account',
-          custody: 'self-custody',
-          assets: 'ETH · USDC',
-          status: 'planned',
-          permissions: 'message/tx signing',
-        },
-        {
-          id: 'hyperliquid',
-          name: 'Hyperliquid',
-          kind: 'perps',
-          authority: 'agent wallet + subaccount',
-          custody: 'venue subaccount',
-          assets: 'USDC margin',
-          status: 'planned',
-          permissions: 'orders · TP/SL · reduce-only',
-        },
-        {
-          id: 'binance',
-          name: 'Binance',
-          kind: 'cex',
-          authority: 'trade-only API key',
-          custody: 'exchange subaccount',
-          assets: 'USDC · BTC · ETH',
-          status: 'linked',
-          permissions: 'read · place/cancel orders',
-        },
-        {
-          id: 'okx',
-          name: 'OKX',
-          kind: 'cex',
-          authority: 'trade-only API key',
-          custody: 'exchange subaccount',
-          assets: 'USDC · SUI',
-          status: 'linked',
-          permissions: 'read · place/cancel orders',
-        },
-      ],
-      assetSources: [
-        {
-          source: 'OWS wallets',
-          detail: 'CAIP-10 accounts',
-          cadence: 'on demand',
-          status: 'ready',
-        },
-        {
-          source: 'Sui RPC',
-          detail: 'coin objects + policy objects',
-          cadence: '5s',
-          status: 'live',
-        },
-        {
-          source: 'CEX private APIs',
-          detail: 'balances + open orders',
-          cadence: '15s',
-          status: 'scoped',
-        },
-        {
-          source: 'Public market feeds',
-          detail: 'prices + funding + depth',
-          cadence: '1s-60s',
-          status: 'mixed',
-        },
-      ],
+      venues: buildVenueAccounts(),
+      assetSources: buildAssetSources(),
+      inventory: LOCAL_INVENTORY,
+      inventoryAdapters: INVENTORY_ADAPTERS.target_adapters,
     },
     // connected centralized exchanges (read + trade, never withdraw)
-    exchanges: [
-      {
-        id: 'binance',
-        name: 'Binance',
-        c: '#F0B90B',
-        status: 'connected',
-        balance: 8420.0,
-        perms: 'Read · Trade',
-        withdraw: false,
-        key: 'bnb_••••7c2a',
-      },
-      {
-        id: 'okx',
-        name: 'OKX',
-        c: '#AEB7C2',
-        status: 'connected',
-        balance: 3180.0,
-        perms: 'Read · Trade',
-        withdraw: false,
-        key: 'okx_••••1f90',
-      },
-      {
-        id: 'bybit',
-        name: 'Bybit',
-        c: '#F7A600',
-        status: 'disconnected',
-        balance: 0,
-        perms: '—',
-        withdraw: false,
-        key: null,
-      },
-    ],
+    exchanges: buildExchangeAccounts(),
   },
 };
 

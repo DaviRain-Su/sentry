@@ -12,6 +12,7 @@ import { WORKER_CONFIGURED, parseIntent as parseWorkerIntent, getSuiPriceHistory
 import { parseIntent as parseLocalIntent } from '../../core/strategy.js';
 import { runBacktest } from '../../core/backtest.js';
 import deployment from '../../core/deployment.js';
+import { TARGET_EXECUTION_VENUES } from '../../core/venues.js';
 
 function Stepper({ step, steps }) {
   return (
@@ -117,10 +118,10 @@ function GuardianRow({ g }) {
 
 /* visual multi-leg builder — add/remove legs, live net-delta, liquidation preview */
 const VENUE_OPTS = {
-  'funding-arb': ['Bluefin', 'Hyperliquid', 'Aevo', 'Binance', 'Bybit', 'Drift'],
-  spot: ['Binance', 'OKX', 'Bybit', 'Cetus', 'DeepBook', 'Raydium', 'Uniswap'],
+  'funding-arb': ['Hyperliquid', 'OKX', 'Ethereum'],
+  spot: TARGET_EXECUTION_VENUES,
 };
-const MARK_PX = { 'funding-arb': 4.182, spot: 4.182 };
+const MARK_PX = { 'funding-arb': 104000, spot: 150 };
 
 function defaultLegsFor(scenario) {
   if (scenario === 'spot')
@@ -130,7 +131,7 @@ function defaultLegsFor(scenario) {
     ];
   if (scenario === 'funding-arb')
     return [
-      { venue: 'Aevo', side: 'short', pct: 50 },
+      { venue: 'OKX', side: 'short', pct: 50 },
       { venue: 'Hyperliquid', side: 'long', pct: 50 },
     ];
   return [
@@ -319,7 +320,7 @@ function LegBuilder({ scenario, budget, leverage, legs, setLegs }) {
               />
               {liqPx && (
                 <div className="mono" style={{ fontSize: 9.5, color: 'var(--warn)', marginTop: 7 }}>
-                  liq ≈ ${liqPx.toFixed(3)} · {lev}×{' '}
+                  liq ≈ ${fmtUsd(liqPx, 0)} · {lev}×{' '}
                 </div>
               )}
             </div>
@@ -420,20 +421,22 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
   // a market/catalog "Deploy" seeds the wizard: jump to Review with the scenario pre-filled
   const seeded = seed && PARSED[seed.scenario] ? seed.scenario : null;
   const seedMeta = seeded ? PARSED[seeded].meta : null;
+  const initialScenario = seeded || 'funding-arb';
+  const initialMeta = seedMeta || PARSED[initialScenario].meta || RG.parsed.meta;
   const defaultValues = useMemo(
     () => ({
       text: (seed && seed.text) || '',
-      scenario: seeded || 'safe',
-      budget: seedMeta ? seedMeta.budget : 500,
-      slip: seedMeta ? seedMeta.slip : 1.2,
+      scenario: initialScenario,
+      budget: initialMeta.budget,
+      slip: initialMeta.slip,
       expiry: 14,
       leverage: 2,
       liqBuffer: 25,
       flipThresh: 0,
       requireApproval: false,
-      legs: defaultLegsFor(seeded || 'safe'),
+      legs: defaultLegsFor(initialScenario),
     }),
-    [seed, seedMeta, seeded]
+    [seed, initialMeta, initialScenario]
   );
   const form = useForm({ defaultValues });
   const [step, setStep] = useState(seeded ? 1 : 0);
@@ -550,6 +553,19 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
             flip: scenario === 'funding-arb',
             ltv: scenario === 'lend',
           };
+          const venueScoped = ['funding-arb', 'spot'].includes(scenario);
+          const previewTitle = venueScoped ? 'Action preview' : 'Transaction preview';
+          const previewBadge = venueScoped ? 'venue actions' : 'PTB · human-readable';
+          const policyTitle = venueScoped ? 'Venue authorization guard' : 'Move Policy Object';
+          const policyCopy = venueScoped
+            ? 'This guard combines local Guardian checks, trade-only venue credentials and venue-side limits. It blocks withdrawals and refuses any order outside the configured budget, market scope and expiry.'
+            : "This on-chain object is the agent's leash. It can never exceed these limits, enforced by Move, not by trust. You can revoke it any time.";
+          const budgetCopy = venueScoped
+            ? 'Cap applied before every venue order, with matching limits expected on OKX/Hyperliquid accounts.'
+            : 'Hard cap on total spend. The agent self-checks remaining budget before every order.';
+          const scopeOptions = venueScoped
+            ? [meta.scope, 'Hyperliquid', 'OKX', 'Ethereum', 'Solana']
+            : [meta.scope, 'SUI/USDC', 'DEEP/USDC', 'WAL/USDC'];
           const blocked = P.guardian.some((g) => g.level === 'fail');
           const failCount = P.guardian.filter((g) => g.level === 'fail').length;
           const BT = live && liveBacktest ? liveBacktest : P.backtest;
@@ -583,16 +599,16 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                     </h2>
                   </div>
                   <p style={{ color: 'var(--t1)', fontSize: 13.5, marginBottom: 16 }}>
-                    Write it in plain language. The agent translates intent into a programmable
-                    transaction block (PTB) and a Move Policy Object that limits exactly what it can
-                    do.
+                    Write it in plain language. The local daemon turns intent into a venue action
+                    plan, then Guardian checks budget, market scope, liquidation buffer and
+                    withdrawal safety before any external agent can act.
                   </p>
                   <div style={{ position: 'relative' }}>
                     <textarea
                       value={text}
                       onChange={(e) => setText(e.target.value)}
                       rows={3}
-                      placeholder="e.g. When SUI drops more than 8%, deploy a 500 USDC rescue grid…"
+                      placeholder="e.g. Long Hyperliquid and short OKX BTC-PERP when funding spread clears 8% APR..."
                       style={{
                         width: '100%',
                         resize: 'none',
@@ -865,16 +881,16 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                   )}
 
                   <div className="rg-2col" style={{ alignItems: 'start' }}>
-                    {/* PTB preview */}
+                    {/* transaction / venue-action preview */}
                     <div className="card" style={{ overflow: 'hidden' }}>
                       <div className="card-hd" style={{ paddingBottom: 12 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ color: 'var(--sui)' }}>
                             <Icon name="grid" size={16} />
                           </span>
-                          <div className="card-title">Transaction preview</div>
+                          <div className="card-title">{previewTitle}</div>
                         </div>
-                        <span className="badge badge-sui">PTB · human-readable</span>
+                        <span className="badge badge-sui">{previewBadge}</span>
                       </div>
                       <div
                         style={{
@@ -1031,7 +1047,8 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                         className="bg-accent text-accent-foreground font-semibold"
                         onPress={() => setStep(2)}
                       >
-                        Configure policy <Icon name="chevR" size={15} />
+                        {venueScoped ? 'Configure guard' : 'Configure policy'}{' '}
+                        <Icon name="chevR" size={15} />
                       </Button>
                     )}
                   </div>
@@ -1046,13 +1063,11 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                       <Icon name="shield" size={18} />
                     </span>
                     <h2 className="display" style={{ fontSize: 19, fontWeight: 600 }}>
-                      Move Policy Object
+                      {policyTitle}
                     </h2>
                   </div>
                   <p style={{ color: 'var(--t1)', fontSize: 13.5, marginBottom: 20 }}>
-                    This on-chain object is the agent's leash. It can{' '}
-                    <strong style={{ color: 'var(--t0)' }}>never</strong> exceed these limits —
-                    enforced by Move, not by trust. You can revoke it any time.
+                    {policyCopy}
                   </p>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -1087,8 +1102,7 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                         </Slider.Track>
                       </Slider>
                       <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 6 }}>
-                        Hard cap on total spend. The agent self-checks remaining budget before every
-                        order.
+                        {budgetCopy}
                       </div>
                     </div>
 
@@ -1164,25 +1178,24 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                         Allowed markets &amp; venues
                       </label>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        {Array.from(new Set([meta.scope, 'SUI/USDC', 'DEEP/USDC', 'WAL/USDC'])).map(
-                          (v) => {
-                            const on = v === meta.scope;
-                            return (
-                              <div
-                                key={v}
-                                className={`badge ${on ? 'badge-accent' : 'badge-neutral'}`}
-                                style={{ padding: '8px 12px', fontSize: 12 }}
-                              >
-                                {on && <Icon name="check" size={12} stroke={2.6} />}
-                                {v}
-                              </div>
-                            );
-                          }
-                        )}
+                        {Array.from(new Set(scopeOptions)).map((v) => {
+                          const on = v === meta.scope;
+                          return (
+                            <div
+                              key={v}
+                              className={`badge ${on ? 'badge-accent' : 'badge-neutral'}`}
+                              style={{ padding: '8px 12px', fontSize: 12 }}
+                            >
+                              {on && <Icon name="check" size={12} stroke={2.6} />}
+                              {v}
+                            </div>
+                          );
+                        })}
                       </div>
                       <div style={{ fontSize: 11.5, color: 'var(--t2)', marginTop: 8 }}>
-                        Scope locks the agent to these markets only. Anything else is rejected
-                        on-chain.
+                        {venueScoped
+                          ? 'Scope locks the agent to these markets only. Anything else is rejected by Guardian and venue preflight.'
+                          : 'Scope locks the agent to these markets only. Anything else is rejected on-chain.'}
                       </div>
                     </div>
 
@@ -1592,7 +1605,9 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--t2)' }}>
                           {readOnlyPreview
-                            ? 'The parsed intent, PTB preview and Guardian output came from the live Worker. Connect a Sui wallet only when you want to sign and deploy.'
+                            ? venueScoped
+                              ? 'The parsed intent, venue action preview and Guardian output came from the live Worker. Pair the local daemon before allowing execution.'
+                              : 'The parsed intent, PTB preview and Guardian output came from the live Worker. Connect a Sui wallet only when you want to sign and deploy.'
                             : requireApproval
                               ? 'The agent stages orders; nothing executes without your sign-off.'
                               : 'After this, the agent acts autonomously within limits — no more signing.'}
