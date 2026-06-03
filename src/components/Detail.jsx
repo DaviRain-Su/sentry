@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — Policy Inspect slide-over + on-chain explorer
+   Sentry — Policy Inspect slide-over + on-chain explorer
    Makes the Move Policy Object tangible: struct, capabilities,
    protocol allow-list, audit trail.
    =========================================================== */

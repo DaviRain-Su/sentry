@@ -1,6 +1,6 @@
 name: Deploy frontend to Cloudflare Pages
 
-# Auto-deploys the RescueGrid dashboard to Cloudflare Pages on every push to main.
+# Auto-deploys the Sentry dashboard to Cloudflare Pages on every push to main.
 # CI bakes VITE_WORKER_URL (the deployed Worker) into the build — the local
 # .env.local is gitignored and absent here, so the URL below is the single
 # source of truth for production. Requires two repo secrets:
@@ -35,10 +35,10 @@ jobs:
       - name: Build (demo + live Worker reads)
         run: npm run build
         env:
-          VITE_WORKER_URL: https://rescuegrid-worker.davirain-yin.workers.dev
+          VITE_WORKER_URL: https://sentry-worker.davirain-yin.workers.dev
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=rescuegrid --branch=main
+          command: pages deploy dist --project-name=sentry --branch=main

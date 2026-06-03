@@ -1,10 +1,10 @@
-// RescueGrid deployment constants — the canonical shared record (mirrors
+// Sentry deployment constants — the canonical shared record (mirrors
 // deployment.testnet.json). Imported by the frontend, the cloud Worker, and a
 // future local agent. Plain ESM so it loads under Vite, esbuild and Node.
 export default {
   chain: 'sui:testnet',
   rpc: 'https://fullnode.testnet.sui.io:443',
-  rescuegrid: {
+  sentry: {
     package_id: '0x92f6e3218151e4d16fa51fd49df974a84ea744510f5e5a8ff79a01aacf27bb78',
     upgrade_cap: '0x87b874c867f452b78a88ab08d4324efc1b7f48cc9c838049aca560dba4149d9f',
     publish_tx: '27k5sjFx19GoL2cT9H9qTamvKdij2YpQVa3o541Th4sR',

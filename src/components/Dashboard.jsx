@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — Dashboard screen
+   Sentry — Dashboard screen
    =========================================================== */
 import { useState, useEffect } from 'react'
 import { RG } from '../data.js'

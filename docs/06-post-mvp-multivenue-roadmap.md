@@ -1,4 +1,4 @@
-# RescueGrid Post-MVP Multivenue Roadmap v0.1
+# Sentry Post-MVP Multivenue Roadmap v0.1
 
 状态：Planning
 日期：2026-06-02
@@ -11,14 +11,14 @@ This roadmap does not change the hackathon MVP.
 Hackathon scope remains:
 
 - Sui Testnet only.
-- MoveGate Mandate + RescuePolicyWrapper.
+- MoveGate Mandate + SentryPolicyWrapper.
 - Deepbook as the only live executor adapter.
 - Cloud Agent with Local Agent extension points.
 - No mainnet funds, no CEX custody, no multi-chain arbitrage promise.
 
 The long-term product can become a cross-chain, cross-venue autonomous execution network, but it must be built as a separate expansion layer. The safe framing is:
 
-> RescueGrid is a unified control plane for policy-constrained autonomous execution across venue-specific accounts.
+> Sentry is a unified control plane for policy-constrained autonomous execution across venue-specific accounts.
 
 It is not:
 
@@ -31,10 +31,10 @@ It is not:
 
 The product should unify strategy, policy, risk and execution interfaces, not force every chain and exchange into one account model.
 
-Users should see one RescueGrid Account, but internally it maps to many venue-specific accounts:
+Users should see one Sentry Account, but internally it maps to many venue-specific accounts:
 
 ```text
-RescueGridAccount
+SentryAccount
   owner identities
     wallet / passkey / oauth / hardware signer
   agent modes
@@ -62,9 +62,9 @@ The product value is a consistent operator experience:
 
 ## 3. Account Model
 
-### RescueGrid Account
+### Sentry Account
 
-The RescueGrid Account is a control-plane identity. It owns metadata, strategy mandates, risk preferences, linked venue accounts and audit history. It is not the canonical custody address for every asset.
+The Sentry Account is a control-plane identity. It owns metadata, strategy mandates, risk preferences, linked venue accounts and audit history. It is not the canonical custody address for every asset.
 
 Required fields:
 
@@ -114,7 +114,7 @@ A single abstraction must expose these differences instead of hiding them.
 
 Owns user-facing product state:
 
-- RescueGrid Account.
+- Sentry Account.
 - StrategyMandate lifecycle.
 - Global and per-venue limits.
 - Guardian decisions.
@@ -184,7 +184,7 @@ Verified role:
 - documented AI-agent integration flow with quote, status, chains, tokens and tools endpoints;
 - supports EVM, Solana, Bitcoin and Sui coverage according to current docs.
 
-Fit for RescueGrid:
+Fit for Sentry:
 
 - route discovery for rebalancing;
 - quote and status tracking;
@@ -194,7 +194,7 @@ Fit for RescueGrid:
 
 Non-fit:
 
-- not a substitute for RescueGrid policy;
+- not a substitute for Sentry policy;
 - not sufficient for CEX withdrawal safety;
 - not a guarantee that cross-venue arbitrage is atomic or risk-free.
 
@@ -209,7 +209,7 @@ Verified role:
 - hooks for post-swap destination-chain contract calls;
 - cross-chain messaging and workflows.
 
-Fit for RescueGrid:
+Fit for Sentry:
 
 - cross-chain rebalancing;
 - onboarding assets from one chain into another venue;
@@ -249,7 +249,7 @@ Default safety model:
 - use trade-only API keys;
 - disable withdrawals by default;
 - require IP allow-listing;
-- cap daily notional and per-order notional in RescueGrid;
+- cap daily notional and per-order notional in Sentry;
 - store keys in an isolated signer service or local daemon;
 - never claim chain-enforced non-custodial guarantees for CEX balances.
 
@@ -263,7 +263,7 @@ Allowed autonomous actions by default:
 
 ### Hyperliquid
 
-Hyperliquid is a strong early candidate for perps expansion because it already has primitives close to the RescueGrid model:
+Hyperliquid is a strong early candidate for perps expansion because it already has primitives close to the Sentry model:
 
 - API wallets / agent wallets;
 - subaccounts and vaults;
@@ -272,7 +272,7 @@ Hyperliquid is a strong early candidate for perps expansion because it already h
 - `expiresAfter` for stale-action rejection;
 - agent-signed transfers between certain internal balance classes.
 
-Fit for RescueGrid:
+Fit for Sentry:
 
 - first perps venue adapter;
 - strategy templates for reduce-only de-risking, TP/SL repair, TWAP unwind and basis monitoring;
@@ -344,7 +344,7 @@ Default product rule:
 
 - CEX adapters can trade autonomously inside a subaccount.
 - CEX withdrawals require explicit user confirmation unless the user creates a separate high-risk settlement mandate.
-- Even when withdrawals are allowed, RescueGrid must cap amount, destination, asset and frequency.
+- Even when withdrawals are allowed, Sentry must cap amount, destination, asset and frequency.
 
 ## 8. StrategyMandate v2
 
@@ -479,7 +479,7 @@ Sui Testnet only. No change to current MVP.
 
 - Which provider should be the primary bridge router per chain pair: LI.FI, deBridge or direct protocol integration?
 - What is the minimum safe local signer architecture for CEX keys?
-- Should RescueGrid run one agent key per strategy, per venue account, or per execution process?
+- Should Sentry run one agent key per strategy, per venue account, or per execution process?
 - How should global emergency stop propagate to CEX subaccounts and Hyperliquid API wallets?
 - Can EVM account guards express enough constraints for strategy mandates without making accounts unrecoverable?
 - Should settlement mandates be separate from trading mandates by default?

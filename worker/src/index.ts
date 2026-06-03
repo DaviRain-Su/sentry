@@ -1,4 +1,4 @@
-// RescueGrid API Worker (Cloudflare Workers + Hono).
+// Sentry API Worker (Cloudflare Workers + Hono).
 // E2/E3/E4/E5/E7 are wired for the Sui-first MVP: parse, build policy tx,
 // chain-authoritative reads, Durable Object runtime, and gated agent ticks.
 import { Hono } from 'hono'
@@ -30,7 +30,7 @@ export interface Env {
   OWNER_KEY?: string
   AGENT_KEY?: string
   INTERNAL_AGENT_TICK_TOKEN?: string
-  RESCUEGRID_DEMO_MODE?: string
+  SENTRY_DEMO_MODE?: string
   EXECUTION_ENABLED?: string
   REQUIRED_DBUSDC_BALANCE?: string
   REQUIRED_DEEP_BALANCE?: string
@@ -81,7 +81,7 @@ async function runtimeFeedForWrappers(env: Env, wrapperIds: string[]): Promise<R
 app.use('/api/*', cors())
 app.use('/api/*', bodyLimit({ maxSize: 50 * 1024 }))
 
-app.get('/', (c) => c.json({ service: 'rescuegrid-worker', agent: AGENT_ADDRESS, status: 'ok' }))
+app.get('/', (c) => c.json({ service: 'sentry-worker', agent: AGENT_ADDRESS, status: 'ok' }))
 
 // ── E2: parse natural-language intent into a structured strategy ──────────
 app.post('/api/intents/parse', async (c) => {
@@ -413,7 +413,7 @@ app.post('/api/agent/tick', async (c) => {
     return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid JSON body.' }, 400)
   }
   if (!body.wrapper_id) return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'wrapper_id required.' }, 400)
-  const forceResult = validateForceTrigger({ forceTriggerRequested: body.force_trigger === true, demoMode: c.env.RESCUEGRID_DEMO_MODE })
+  const forceResult = validateForceTrigger({ forceTriggerRequested: body.force_trigger === true, demoMode: c.env.SENTRY_DEMO_MODE })
   if (!forceResult.ok) return c.json(forceResult.body, forceResult.status as 403)
   const result = await runTick(c.env, { wrapperId: body.wrapper_id, forceTrigger: forceResult.forceTrigger })
   return c.json({ status: 'ok', ...result })

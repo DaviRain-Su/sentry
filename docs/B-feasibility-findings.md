@@ -112,14 +112,14 @@ ABI 层结构性结论（实测）：
 
 → 命令顺序（auth 在前、deepbook 居中、record 收尾消费 token）与单 PTB 兼容，无需重排。
 
-**未尽事项**：完整 compile-proof 需要 RescueGrid wrapper 本身存在（依赖 Phase C 的 `record_agent_trade` / `create_policy_wrapper`）。因此 B5 的"最小脚本编译验证"实质并入 **C5**（AuthToken 单次消费 + ActionReceipt 创建测试）。
+**未尽事项**：完整 compile-proof 需要 Sentry wrapper 本身存在（依赖 Phase C 的 `record_agent_trade` / `create_policy_wrapper`）。因此 B5 的"最小脚本编译验证"实质并入 **C5**（AuthToken 单次消费 + ActionReceipt 创建测试）。
 
 ---
 
 ## 对后续阶段的影响（进 spec 的探索结论）
 
 1. **Phase C**：采用 thin Move helper 构造 `allowed_coin_types: vector<TypeName>`；wrapper 创建 PTB 末尾 `public_share_object` 共享 Mandate 与 wrapper。
-2. **常量固化**：把 MoveGate package/registry/treasury/feeconfig id、DeepBook package、`SUI_DBUSDC` pool id、DBUSDC coin type 写入部署配置常量（对应 `docs/03-technical-spec.md §1` 的 `RESCUEGRID_*` 与新增 MoveGate/DeepBook 地址）。
+2. **常量固化**：把 MoveGate package/registry/treasury/feeconfig id、DeepBook package、`SUI_DBUSDC` pool id、DBUSDC coin type 写入部署配置常量（对应 `docs/03-technical-spec.md §1` 的 `SENTRY_*` 与新增 MoveGate/DeepBook 地址）。
 3. **creation fee**：提交创建交易前 live 读取 `FeeConfig.creation_fee`（当前 0.01 SUI），不硬编码。
 4. **F1**：先解决 DBUSDC testnet faucet + agent BalanceManager 初始化。
 5. **回退方案**：未触发；独立 RescuePolicy 路线封存。

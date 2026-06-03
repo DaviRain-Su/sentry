@@ -8,11 +8,11 @@ Source checked:
 
 ## Verdict
 
-`pi-worker` is useful for RescueGrid, but it should not replace the current MVP cloud-agent hot path yet.
+`pi-worker` is useful for Sentry, but it should not replace the current MVP cloud-agent hot path yet.
 
 The right integration shape is:
 
-1. Keep the current RescueGrid Cloudflare Worker + Durable Object as the deterministic policy runtime.
+1. Keep the current Sentry Cloudflare Worker + Durable Object as the deterministic policy runtime.
 2. Use `pi-worker` as an optional agent session layer for operator/copilot workflows, diagnostics, strategy drafting, local/remote terminal UX, and future local-agent parity.
 3. Only move autonomous trade execution onto `pi-worker` primitives after a separate security and determinism spike.
 
@@ -34,11 +34,11 @@ Its package layer exposes Worker-native primitives:
 - signed download helpers,
 - worker-friendly pi agent/core re-exports.
 
-These are strong matches for a future RescueGrid operator console and local/cloud agent parity.
+These are strong matches for a future Sentry operator console and local/cloud agent parity.
 
 ## Why not replace the MVP Worker now
 
-RescueGrid's hot path is narrower and more safety-critical:
+Sentry's hot path is narrower and more safety-critical:
 
 - read chain state,
 - evaluate trigger,
@@ -76,7 +76,7 @@ Initial usage should be non-custodial:
 Run a small spike before adopting it:
 
 1. Deploy `examples/terminal-agent` locally with Wrangler.
-2. Create a minimal RescueGrid session that can read policy state through our Worker API.
+2. Create a minimal Sentry session that can read policy state through our Worker API.
 3. Add a read-only command: "summarize this policy's risk".
 4. Add a proposal-only command: "draft a rescue strategy", returning a Strategy JSON and hash.
 5. Confirm no dynamic execution path can access signing secrets.

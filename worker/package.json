@@ -1,9 +1,9 @@
 {
-  "name": "rescuegrid-worker",
+  "name": "sentry-worker",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "RescueGrid API Worker + Durable Object agent runtime (Cloudflare Workers).",
+  "description": "Sentry API Worker + Durable Object agent runtime (Cloudflare Workers).",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

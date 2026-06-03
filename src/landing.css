@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — landing page styles
+   Sentry — landing page styles
    reuses tokens from styles.css; overrides scroll behaviour
    (scroll overrides scoped to .lp-mode so they don't fight the
    app's fixed dashboard layout in this single-page app)

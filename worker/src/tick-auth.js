@@ -30,7 +30,7 @@ export function validateForceTrigger({ forceTriggerRequested, demoMode }) {
         blocker_label: 'Force trigger disabled',
         blocker_codes: ['FORCE_TRIGGER_DISABLED'],
         blocker_labels: ['Force trigger disabled'],
-        message: 'force_trigger is only accepted when RESCUEGRID_DEMO_MODE=true.',
+        message: 'force_trigger is only accepted when SENTRY_DEMO_MODE=true.',
         force_trigger_allowed: false,
         execution_claimed: false,
       },

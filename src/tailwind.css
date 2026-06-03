@@ -13,7 +13,7 @@
 @import '@heroui/react/styles';
 @source '../node_modules/@heroui/react/dist';
 
-/* Map RescueGrid's neon accent into HeroUI's theme tokens so HeroUI components
+/* Map Sentry's neon accent into HeroUI's theme tokens so HeroUI components
    pick up the brand color instead of the default palette. */
 @theme {
   --color-accent: #2ee6ce;
@@ -24,7 +24,7 @@
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   HeroUI theming overrides — pull HeroUI's Button/Card into RescueGrid's neon
+   HeroUI theming overrides — pull HeroUI's Button/Card into Sentry's neon
    design language. HeroUI's stylesheet is UNLAYERED (it outranks @layer
    utilities), which is why Tailwind utilities like `px-[18px]` lose to it. So
    these overrides are also unlayered and defined AFTER the HeroUI import — same

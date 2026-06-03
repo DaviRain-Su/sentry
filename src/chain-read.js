@@ -5,7 +5,7 @@ import deployment from '../core/deployment.js'
 
 const RPC = deployment.rpc || 'https://fullnode.testnet.sui.io:443'
 const INDEXER = 'https://deepbook-indexer.testnet.mystenlabs.com'
-const RG = deployment.rescuegrid
+const RG = deployment.sentry
 const DB = deployment.deepbook
 
 async function rpc(method, params) {

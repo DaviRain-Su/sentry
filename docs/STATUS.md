@@ -1,4 +1,4 @@
-# RescueGrid — Build Status
+# Sentry — Build Status
 
 日期：2026-06-02 · 环境：Sui Testnet
 
@@ -9,7 +9,7 @@ A running snapshot of what is built and how it was verified. Demo-facing summary
 | Layer | Status | Verified by |
 | --- | --- | --- |
 | **Web dashboard** (Vite + React) | ✅ | `npm run build` (2,419 modules); landing → zkLogin → dashboard, flash-crash demo |
-| **Move package** `rescuegrid::policy` | ✅ deployed | `sui move test` 8/8; published `0x92f6e3…bb78` |
+| **Move package** `sentry::policy` | ✅ deployed | `sui move test` 8/8; published `0x92f6e3…bb78` |
 | **Worker API** (Cloudflare + Hono) | ✅ all endpoints | `npm test` + `npm run typecheck`; runtime activity log covered |
 | **Sign-in** | ✅ | Sui wallet (Slush/std, no creds) primary; Enoki zkLogin optional |
 | **Frontend ↔ Worker contract** | ✅ wired | live reads are Worker-first with direct-chain fallback; create/revoke use Worker-built unsigned txs |
@@ -18,7 +18,7 @@ A running snapshot of what is built and how it was verified. Demo-facing summary
 
 ## On-chain (testnet)
 
-- rescuegrid package: `0x92f6e3218151e4d16fa51fd49df974a84ea744510f5e5a8ff79a01aacf27bb78`
+- sentry package: `0x92f6e3218151e4d16fa51fd49df974a84ea744510f5e5a8ff79a01aacf27bb78`
 - agent: `0x9eeed099…2ee43` · passport `0x0e7421…f8e6b` · BalanceManager `0x2e2e818f…aec2` (unfunded)
 - reuses deployed MoveGate `0xec91e6…cf884a` · Deepbook `SUI_DBUSDC` pool `0x1c1936…7163a5`
 - See `deployment.testnet.json` (`npm run config`).
@@ -26,7 +26,7 @@ A running snapshot of what is built and how it was verified. Demo-facing summary
 ## Phase ledger
 
 - **B** feasibility — ✅ GO (`docs/B-feasibility-findings.md`): MoveGate Mandate shareable w/o owner co-sign, AuthToken hot-potato, Deepbook pools live.
-- **C** Move — ✅ C1–C7. RescuePolicyWrapper + create/revoke/assert/record; thin helper builds `vector<TypeName>`; AuthToken consumed via MoveGate receipt; published.
+- **C** Move — ✅ C1–C7. SentryPolicyWrapper + create/revoke/assert/record; thin helper builds `vector<TypeName>`; AuthToken consumed via MoveGate receipt; published.
 - **E** Worker — ✅ E1–E8. parse (strategy_hash matches all 4 spec vectors) · create_policy PTB (zkLogin-signed, dry-run success) · activity (chain-authoritative + Durable Object runtime feed) · Guardian · tick state machine · Durable Object alarm · state sync.
 - **F** Deepbook — 🟡 F1/F3 builders structurally verified (serialize + dry-run of create). Agent + BalanceManager provisioned on-chain. **Blocked:** DBUSDC mint is permissioned and the SUI_DBUSDC pool is illiquid, so the BM can't be self-funded → live execution dry-run pending an external DBUSDC source. `EXECUTION_ENABLED=false` until then.
 - **D** dashboard wiring — ✅ sign-in (Sui wallet primary, zkLogin optional); live create-policy (parse → build → wallet-sign → activate); live D4 activity + D5 revoke; responsive + lazy-loaded landing; D3 live PTB preview. **Live write loop proven on-chain** (see below).

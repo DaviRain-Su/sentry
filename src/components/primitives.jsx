@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — shared components & helpers
+   Sentry — shared components & helpers
    =========================================================== */
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { Liveline } from 'liveline'
@@ -113,7 +113,7 @@ export function adapterColor(name) {
   Object.assign(m, {
     Hyperliquid: '#7CF5D0', Aevo: '#7B8BFF', Drift: '#9945FF',
     Binance: '#F0B90B', OKX: '#AEB7C2', Bybit: '#F7A600',
-    deBridge: '#2EE6CE', Wormhole: '#5AA6FF', RescueGrid: '#2EE6CE', 'all venues': 'var(--t3)',
+    deBridge: '#2EE6CE', Wormhole: '#5AA6FF', Sentry: '#2EE6CE', 'all venues': 'var(--t3)',
   })
   return m[name] || 'var(--t2)'
 }
@@ -236,7 +236,7 @@ export function Logo({ size = 30 }) {
         </svg>
       </div>
       <div style={{ lineHeight: 1 }}>
-        <div className="display" style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.01em' }}>RescueGrid</div>
+        <div className="display" style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.01em' }}>Sentry</div>
       </div>
     </div>
   )

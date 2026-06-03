@@ -1,7 +1,7 @@
 // Proof of the E3 create_policy PTB builder via DRY-RUN (no key, no broadcast).
 // Builds the strategy + tx exactly as the Worker does, then dry-runs it against
 // testnet to confirm it is well-formed and would succeed (PolicyCreated emitted,
-// RescuePolicyWrapper created). The real signature is the frontend's zkLogin.
+// SentryPolicyWrapper created). The real signature is the frontend's zkLogin.
 //
 //   RG_OWNER=<owner address with gas> node test/verify-create-policy.mjs
 import { strategyHash } from '../src/strategy-core.js'
@@ -41,9 +41,9 @@ if (status !== 'success') console.log('error:', JSON.stringify(res.effects?.stat
 const ev = (res.events || []).find((e) => String(e.type).endsWith('::policy::PolicyCreated'))
 console.log('PolicyCreated emitted:', !!ev, ev ? { mandate_id: ev.parsedJson.mandate_id, wrapper_id: ev.parsedJson.wrapper_id } : '')
 const wrapper = (res.objectChanges || []).find(
-  (o) => o.objectType && o.objectType.endsWith('::policy::RescuePolicyWrapper'),
+  (o) => o.objectType && o.objectType.endsWith('::policy::SentryPolicyWrapper'),
 )
-console.log('RescuePolicyWrapper created:', wrapper?.objectType ? 'yes' : 'no')
+console.log('SentryPolicyWrapper created:', wrapper?.objectType ? 'yes' : 'no')
 const gas = res.effects?.gasUsed
 if (gas) console.log('gas (computation+storage):', Number(gas.computationCost) + Number(gas.storageCost), 'MIST')
 process.exit(status === 'success' ? 0 : 1)

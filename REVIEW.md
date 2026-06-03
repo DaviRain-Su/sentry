@@ -1,4 +1,4 @@
-# RescueGrid 全面代码审查报告
+# Sentry 全面代码审查报告
 
 **审查日期**: 2026-06-02  
 **审查范围**: Worker (Cloudflare Workers + Hono + Durable Objects) / 前端 (Vite+React) / Move 合约 / 共享逻辑  
@@ -9,7 +9,7 @@
 
 ## 执行摘要
 
-RescueGrid 项目整体架构清晰，Worker/前端/合约的分层合理，MoveGate 集成正确，安全模式（Worker 不持有 owner 密钥、zkLogin 签名、Guardian 多层检查）设计良好。但存在 **1 个 P0 严重缺陷**（Durable Object 可能因异常永久停止）、**多个 P1 安全隐患和可靠性问题**，以及代码重复、测试缺失等结构性债务。
+Sentry 项目整体架构清晰，Worker/前端/合约的分层合理，MoveGate 集成正确，安全模式（Worker 不持有 owner 密钥、zkLogin 签名、Guardian 多层检查）设计良好。但存在 **1 个 P0 严重缺陷**（Durable Object 可能因异常永久停止）、**多个 P1 安全隐患和可靠性问题**，以及代码重复、测试缺失等结构性债务。
 
 ---
 
@@ -294,7 +294,7 @@ async monitorPrice(asset: string): Promise<number> {
 | P2-3 | 策略解析器缺少输入长度限制 | `core/strategy.js` | 超长文本可能导致正则回溯 |
 | P2-4 | clientOrderId 使用 nowMs 可能重复 | `worker/src/tick.js` | 同一毫秒内多次 tick 会产生重复 ID |
 | P2-5 | nowMs 回退到 Date.now() | `worker/src/tick.js` | 链下时间不可靠，建议强制使用链上 Clock |
-| P2-6 | Move 测试覆盖不足 | `move/rescuegrid/tests/` | 仅 happy path + 4 个 assert_policy_valid 错误 |
+| P2-6 | Move 测试覆盖不足 | `move/sentry/tests/` | 仅 happy path + 4 个 assert_policy_valid 错误 |
 | P2-7 | getOwnerSummary 中 BigInt→Number 精度丢失 | `worker/src/chain.js` | `Number(p[k])` 对大 budget 可能丢失精度 |
 | P2-8 | api.js URL 参数未编码 | `src/api.js` | `owner` 直接拼接到 URL，虽然地址格式已验证但仍不安全 |
 | P2-9 | chain-read.js 的 rpc 错误未统一处理 | `src/chain-read.js` | `j.error` 时 throw，但调用侧 catch 不一致 |
@@ -324,7 +324,7 @@ async monitorPrice(asset: string): Promise<number> {
 ## ✅ 做得好的部分
 
 1. **Worker 不持有 owner 密钥**: 创建/撤销交易都在前端签名（zkLogin），Worker 只构建未签名 PTB，安全模型正确。
-2. **Guardian 多层检查**: 链上（MoveGate + RescuePolicyWrapper）+ 链下（runGuardian）双重检查，Guardian 顺序与文档一致。
+2. **Guardian 多层检查**: 链上（MoveGate + SentryPolicyWrapper）+ 链下（runGuardian）双重检查，Guardian 顺序与文档一致。
 3. **AuthToken 一次性消费**: Move 合约中 `record_agent_trade` 通过 `create_success_receipt` 消耗 AuthToken，防止重放。
 4. **执行结果严格验证**: `classifyExecutionResolution` 要求成功 effects + AgentTradeExecuted 事件 + spent_amount 增加三重验证，避免 false positive。
 5. **意图解析缓存**: `parseIntentWithStability` 使用确定性缓存键，避免重复解析。

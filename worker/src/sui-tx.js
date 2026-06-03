@@ -7,7 +7,7 @@ import deployment from './deployment.js'
 
 export const DEPLOYMENT = deployment
 const MG = deployment.movegate
-const RG = deployment.rescuegrid
+const RG = deployment.sentry
 const DB = deployment.deepbook
 const DEEP_TYPE = DB.deep_coin_type
 const ORDER_TYPE_NO_RESTRICTION = 0

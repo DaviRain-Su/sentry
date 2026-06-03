@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — Profile / Wallet screen
+   Sentry — Profile / Wallet screen
    Identity, balances, holdings, session & gas.
    Demo mode shows the zkLogin persona; live mode (wallet connected)
    shows the real address, real balances and a wallet-session card.
@@ -418,7 +418,7 @@ export function Profile({ account, holdings, policies, funding = null, live = fa
                   </div>
                 </div>
                 <div style={{ fontSize: 10.5, color: 'var(--t2)', marginTop: 12, lineHeight: 1.45 }}>
-                  The agent pays fees from the {a.gas?.station || 'RescueGrid Gas Station'} — you hold no SUI for gas and never sign a fee.
+                  The agent pays fees from the {a.gas?.station || 'Sentry Gas Station'} — you hold no SUI for gas and never sign a fee.
                 </div>
               </>
             )}

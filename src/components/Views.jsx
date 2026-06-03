@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — Activity log + Policy management
+   Sentry — Activity log + Policy management
    =========================================================== */
 import { useState, Fragment } from 'react'
 import { RG } from '../data.js'

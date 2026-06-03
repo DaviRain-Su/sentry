@@ -1,8 +1,8 @@
-# RescueGrid Task Breakdown v1.0
+# Sentry Task Breakdown v1.0
 
 状态：Draft
 日期：2026-06-01
-定位：RescueGrid：自主 DeFi 风险响应 Agent
+定位：Sentry：自主 DeFi 风险响应 Agent
 
 任务类型：
 
@@ -28,7 +28,7 @@
 | B2 | Explore | 3h | 最小 Deepbook Testnet 下单脚本 | 能完成一笔测试交易或明确 Testnet 阻塞项 |
 | B3 | Explore | 2h | 核验 zkLogin 最新接入流程 | 记录 dashboard 登录最小链路和 SDK 版本 |
 | B4 | Explore | 2h | 核验 Cloudflare Durable Object alarm/runtime 限制 | 记录 tick 周期、持久状态、部署配置 |
-| B5 | Explore | 2h | 验证 MoveGate AuthToken + Deepbook + RescuePolicyWrapper + ActionReceipt 同一 PTB 可组合性 | 仅当 B0 结论为 MoveGate 可用时执行；最小脚本能构建包含 authorize_action → Deepbook swap → record_agent_trade/create_success_receipt 的 PTB |
+| B5 | Explore | 2h | 验证 MoveGate AuthToken + Deepbook + SentryPolicyWrapper + ActionReceipt 同一 PTB 可组合性 | 仅当 B0 结论为 MoveGate 可用时执行；最小脚本能构建包含 authorize_action → Deepbook swap → record_agent_trade/create_success_receipt 的 PTB |
 | B6 | Explore | 1h | pi-worker 快速浏览 | 已产出 [`docs/07-pi-worker-assessment.md`](07-pi-worker-assessment.md)：可作为 operator/agent-session layer，不替换 MVP deterministic Worker hot path |
 | B7 | Explore | 2h | pi-worker 深度验证 | 仅当需要 operator console 或 local/cloud agent parity 时运行 terminal-agent 示例；验收为读策略状态和 proposal-only strategy draft，不接触 `AGENT_KEY` |
 | B8 | Explore | 2h | LeafSheep/CDPM adapter feasibility note | 明确它只能作为 Post-MVP Sui mainnet PositionManager adapter 参考，不进入 MVP critical path |
@@ -38,7 +38,7 @@
 | ID | Type | Estimate | Task | Acceptance |
 | --- | --- | --- | --- | --- |
 | C1 | Commit | 1h | 初始化 Sui Move package + MoveGate 依赖 | `sui move build` 通过，MoveGate 作为外部依赖正确引入 |
-| C2 | Commit | 2h | 实现 shared `RescuePolicyWrapper` object 和 events | 字段（含 `mandate_id` 引用）、share object 行为和事件与技术规格一致 |
+| C2 | Commit | 2h | 实现 shared `SentryPolicyWrapper` object 和 events | 字段（含 `mandate_id` 引用）、share object 行为和事件与技术规格一致 |
 | C3 | Commit | 3h | 实现 create policy PTB/helper 和 `revoke_policy` | 单笔 PTB 创建 MoveGate Mandate + Wrapper 并确保 Mandate 可被 agent 后续访问；若 PTB 无法稳定构造 MoveGate `TypeName`，用薄 Move helper 负责创建；撤销通过 MoveGate revoke；单元测试覆盖 happy/error path |
 | C4 | Commit | 1.5h | 实现 `assert_policy_valid` | 测试覆盖 pool_id、budget、slippage 校验（agent/expiry/revoked 由 MoveGate 覆盖） |
 | C5 | Commit | 3h | 实现 `record_agent_trade`（通过 MoveGate receipt 消费 AuthToken） | 测试覆盖 AuthToken 单次消费、ActionReceipt 创建、spent_amount 递增、错误 token 拒绝 |
@@ -92,7 +92,7 @@
 
 | ID | Type | Estimate | Task | Acceptance |
 | --- | --- | --- | --- | --- |
-| H1 | Explore | 3h | Local CLI daemon design spike | 明确 `rescuegrid daemon run/status/tick/logs` 命令、key storage、外部 signer 和 activity sync |
+| H1 | Explore | 3h | Local CLI daemon design spike | 明确 `sentry daemon run/status/tick/logs` 命令、key storage、外部 signer 和 activity sync |
 | H2 | Commit | 4h | 抽出 Runtime Core package | Worker 和 CLI daemon 可复用 PolicyReader、Guardian、ExecutorAdapter registry、ActivityWriter 接口 |
 | H3 | Explore | 4h | CDPM/Cetus DLMM adapter design | 明确 PositionManager id、bin range、fee collection、rebalance、agent delegation 风险和 wrapper 扩展需求 |
 | H4 | Explore | 3h | Scallop/Kai adapter design | 明确 lending market/vault target constraints、stale-state pre-step、redeem sizing 和 hot-potato ticket 约束 |
@@ -178,9 +178,9 @@ Polish 可延后：D1 的完整视觉打磨、D6 的细粒度空状态、B7 pi-w
 
 ## Stop Conditions
 
-- MoveGate 合约不可用、Mandate 无法被 agent 无 owner co-sign 访问，或与 RescueGrid 需求不兼容：退回到独立实现 shared RescuePolicy Object；Phase C 估时回到 14h。
+- MoveGate 合约不可用、Mandate 无法被 agent 无 owner co-sign 访问，或与 Sentry 需求不兼容：退回到独立实现 shared RescuePolicy Object；Phase C 估时回到 14h。
 - Deepbook Testnet pool is unavailable：stop before Phase C; either find another documented Testnet-compatible Deepbook route, or downgrade the demo to simulated execution and mark Sub-track 2 as blocked in PRD/test spec.
-- MoveGate AuthToken + Deepbook + RescuePolicyWrapper + ActionReceipt 无法在同一 PTB 中组合：pause and redesign the Policy execution path.
+- MoveGate AuthToken + Deepbook + SentryPolicyWrapper + ActionReceipt 无法在同一 PTB 中组合：pause and redesign the Policy execution path.
 - Any adapter requires signing or submitting before Guardian approves an `ExecutionPlan`：stop and redesign the adapter interface.
 - zkLogin setup blocks demo：allow temporary wallet connect only if PRD marks zkLogin as delayed and demo still proves Policy autonomy.
 - Any implementation needs Mainnet funds：stop; MVP scope is Testnet.

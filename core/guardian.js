@@ -1,5 +1,5 @@
 // E6 — Guardian. Pure decision function over a MoveGate Mandate snapshot, a
-// RescuePolicyWrapper snapshot, and a proposed trade. Mirrors docs §9 ordering
+// SentryPolicyWrapper snapshot, and a proposed trade. Mirrors docs §9 ordering
 // and §4 reason codes. Chain is the final authority; this is the off-chain
 // pre-check that mirrors the on-chain asserts so the agent never submits a
 // doomed tx.

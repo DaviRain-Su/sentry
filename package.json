@@ -1,9 +1,9 @@
 {
-  "name": "rescuegrid-web",
+  "name": "sentry-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "RescueGrid — autonomous DeFi risk-rescue agent on Sui. Hi-fi dashboard prototype.",
+  "description": "Sentry — autonomous DeFi risk-rescue agent on Sui. Hi-fi dashboard prototype.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

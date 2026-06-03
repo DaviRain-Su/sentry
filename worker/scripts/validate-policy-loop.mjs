@@ -34,7 +34,7 @@ for (let i = 2; i < process.argv.length; i += 1) {
 }
 
 if (args.has('--help') || process.argv.includes('-h')) {
-  console.log(`Validate the live Sui Testnet RescueGrid policy write loop.
+  console.log(`Validate the live Sui Testnet Sentry policy write loop.
 
 Usage:
   node worker/scripts/validate-policy-loop.mjs [options]
@@ -182,7 +182,7 @@ assert(DEPLOYMENT.chain === expectedChain, 'Deployment is not configured for Sui
 assert(String(DEPLOYMENT.rpc).includes('testnet'), 'Deployment RPC is not Testnet', { rpc: DEPLOYMENT.rpc })
 
 const workerRoot = await getJson('/')
-assert(workerRoot.service === 'rescuegrid-worker', 'Worker root did not identify rescuegrid-worker', workerRoot)
+assert(workerRoot.service === 'sentry-worker', 'Worker root did not identify sentry-worker', workerRoot)
 assert(workerRoot.agent === delegatedAgentAddress, 'Worker root agent differs from deployment agent', workerRoot)
 
 const nowMs = Date.now()

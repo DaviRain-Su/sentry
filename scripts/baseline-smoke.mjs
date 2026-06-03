@@ -9,7 +9,7 @@ import { getClient, DEPLOYMENT } from '../worker/src/sui-tx.js'
 import { decideTick } from '../worker/src/tick.js'
 import { readBalanceManagerBalance } from '../worker/src/chain.js'
 
-const REQUIRED_WORKER_KEYS = ['AGENT_KEY', 'INTERNAL_AGENT_TICK_TOKEN', 'RESCUEGRID_DEMO_MODE', 'EXECUTION_ENABLED']
+const REQUIRED_WORKER_KEYS = ['AGENT_KEY', 'INTERNAL_AGENT_TICK_TOKEN', 'SENTRY_DEMO_MODE', 'EXECUTION_ENABLED']
 const FRONTEND_URL = 'http://localhost:5173'
 const WORKER_URL = 'http://localhost:8787'
 const INDEXER = 'https://deepbook-indexer.testnet.mystenlabs.com'
@@ -46,7 +46,7 @@ function readEnvKeys(path) {
 
 function getLabel(d, label) {
   switch (label) {
-    case 'rescuegrid_package': return d.rescuegrid.package_id
+    case 'sentry_package': return d.sentry.package_id
     case 'movegate_package': return d.movegate.package_id_original
     case 'agent': return d.agent.address
     case 'agent_passport': return d.agent.passport_id
@@ -66,9 +66,9 @@ async function checkJson(url) {
 }
 
 async function main() {
-  console.log('RescueGrid baseline smoke (secret-safe)')
+  console.log('Sentry baseline smoke (secret-safe)')
 
-  const labels = ['rescuegrid_package', 'movegate_package', 'agent', 'agent_passport', 'balance_manager', 'deepbook_sui_dbusdc_pool', 'dbusdc_coin_type']
+  const labels = ['sentry_package', 'movegate_package', 'agent', 'agent_passport', 'balance_manager', 'deepbook_sui_dbusdc_pool', 'dbusdc_coin_type']
   for (const label of labels) {
     const rootValue = getLabel(deploymentJson, label)
     const coreValue = getLabel(coreDeployment, label)
@@ -90,20 +90,20 @@ async function main() {
 
   const frontend = await fetch(FRONTEND_URL)
   const frontendHtml = await frontend.text()
-  assert('frontend service reachable on reserved port', frontend.status === 200 && frontendHtml.includes('RescueGrid') && frontendHtml.includes('/src/main.jsx'), `${FRONTEND_URL} status=${frontend.status}`)
+  assert('frontend service reachable on reserved port', frontend.status === 200 && frontendHtml.includes('Sentry') && frontendHtml.includes('/src/main.jsx'), `${FRONTEND_URL} status=${frontend.status}`)
   const frontendApi = await fetch(`${FRONTEND_URL}/src/api.js`)
   const frontendApiSource = await frontendApi.text()
   assert('frontend Vite env exposes local Worker URL', frontendApiSource.includes('"VITE_WORKER_URL": "http://localhost:8787"'), 'Vite source sanitized')
 
   const workerRoot = await checkJson(`${WORKER_URL}/`)
-  assert('worker service reachable on reserved port', workerRoot.status === 200 && workerRoot.json?.service === 'rescuegrid-worker', `${WORKER_URL} status=${workerRoot.status}`)
+  assert('worker service reachable on reserved port', workerRoot.status === 200 && workerRoot.json?.service === 'sentry-worker', `${WORKER_URL} status=${workerRoot.status}`)
 
   const client = getClient()
   const checkpoint = await client.getLatestCheckpointSequenceNumber()
   assert('Sui Testnet fullnode reachable', Number(checkpoint) > 0, `latest_checkpoint=${checkpoint}`)
 
   const objectChecks = [
-    ['RescueGrid package', DEPLOYMENT.rescuegrid.package_id],
+    ['Sentry package', DEPLOYMENT.sentry.package_id],
     ['agent passport', DEPLOYMENT.agent.passport_id],
     ['BalanceManager', DEPLOYMENT.agent.balance_manager_id],
     ['DeepBook SUI_DBUSDC pool', DEPLOYMENT.deepbook.pools.SUI_DBUSDC.pool_id],

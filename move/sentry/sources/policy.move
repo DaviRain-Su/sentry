@@ -1,4 +1,4 @@
-/// RescueGrid — RescuePolicyWrapper
+/// Sentry — SentryPolicyWrapper
 ///
 /// Wraps a MoveGate Mandate with the DeFi-specific constraints MoveGate does
 /// not cover: a single allowed Deepbook `pool_id`, a *cumulative* (never-reset)
@@ -53,7 +53,7 @@ const EAuthTokenAmountMismatch: u64 = 14;
 const EMandateAlreadyRevoked: u64 = 15;
 
 // ─── Object ────────────────────────────────────────────────────────────
-public struct RescuePolicyWrapper has key, store {
+public struct SentryPolicyWrapper has key, store {
     id: UID,
     owner: address,
     mandate_id: ID,          // reference to the MoveGate Mandate
@@ -101,15 +101,15 @@ public struct AgentTradeExecuted has copy, drop {
 }
 
 // ─── Read accessors ────────────────────────────────────────────────────
-public fun owner(w: &RescuePolicyWrapper): address { w.owner }
-public fun mandate_id(w: &RescuePolicyWrapper): ID { w.mandate_id }
-public fun agent(w: &RescuePolicyWrapper): address { w.agent }
-public fun pool_id(w: &RescuePolicyWrapper): ID { w.pool_id }
-public fun budget_ceiling(w: &RescuePolicyWrapper): u64 { w.budget_ceiling }
-public fun spent_amount(w: &RescuePolicyWrapper): u64 { w.spent_amount }
-public fun remaining_budget(w: &RescuePolicyWrapper): u64 { w.budget_ceiling - w.spent_amount }
-public fun max_slippage_bps(w: &RescuePolicyWrapper): u16 { w.max_slippage_bps }
-public fun strategy_hash(w: &RescuePolicyWrapper): vector<u8> { w.strategy_hash }
+public fun owner(w: &SentryPolicyWrapper): address { w.owner }
+public fun mandate_id(w: &SentryPolicyWrapper): ID { w.mandate_id }
+public fun agent(w: &SentryPolicyWrapper): address { w.agent }
+public fun pool_id(w: &SentryPolicyWrapper): ID { w.pool_id }
+public fun budget_ceiling(w: &SentryPolicyWrapper): u64 { w.budget_ceiling }
+public fun spent_amount(w: &SentryPolicyWrapper): u64 { w.spent_amount }
+public fun remaining_budget(w: &SentryPolicyWrapper): u64 { w.budget_ceiling - w.spent_amount }
+public fun max_slippage_bps(w: &SentryPolicyWrapper): u16 { w.max_slippage_bps }
+public fun strategy_hash(w: &SentryPolicyWrapper): vector<u8> { w.strategy_hash }
 
 // ─── C2/C3: wrapper construction ───────────────────────────────────────
 /// Pure wrapper constructor. Used by the direct-PTB route and unit tests.
@@ -122,7 +122,7 @@ public fun create_policy_wrapper(
     max_slippage_bps: u16,
     strategy_hash: vector<u8>,
     ctx: &mut TxContext,
-): RescuePolicyWrapper {
+): SentryPolicyWrapper {
     let sender = ctx.sender();
     assert!(budget_ceiling > 0, EZeroBudget);
     assert!(max_slippage_bps <= MAX_ALLOWED_SLIPPAGE_BPS, ESlippageOverCap);
@@ -134,7 +134,7 @@ public fun create_policy_wrapper(
     );
 
     let agent = mandate::mandate_agent(mandate);
-    let wrapper = RescuePolicyWrapper {
+    let wrapper = SentryPolicyWrapper {
         id: object::new(ctx),
         owner: sender,
         mandate_id: object::id(mandate),
@@ -230,7 +230,7 @@ public fun create_policy<BudgetCoin>(
 /// `revoke_mandate`; the wrapper stays but its mandate is dead, so no further
 /// `authorize_action` can succeed.
 public fun revoke_policy(
-    wrapper: &mut RescuePolicyWrapper,
+    wrapper: &mut SentryPolicyWrapper,
     mandate: &mut Mandate,
     mandate_registry: &mut MandateRegistry,
     passport: &mut AgentPassport,
@@ -256,7 +256,7 @@ public fun revoke_policy(
 /// RescueGrid-specific checks (pool / budget / slippage / agent). MoveGate's
 /// `authorize_action` enforces revoked/expired earlier in the PTB. No mutation.
 public fun assert_policy_valid(
-    wrapper: &RescuePolicyWrapper,
+    wrapper: &SentryPolicyWrapper,
     agent: address,
     pool_id: ID,
     amount: u64,
@@ -273,7 +273,7 @@ public fun assert_policy_valid(
 /// `create_success_receipt` which consumes it once and freezes an
 /// ActionReceipt, then increments the cumulative spend.
 public fun record_agent_trade(
-    wrapper: &mut RescuePolicyWrapper,
+    wrapper: &mut SentryPolicyWrapper,
     mandate: &mut Mandate,
     passport: &mut AgentPassport,
     agent_registry: &mut AgentRegistry,

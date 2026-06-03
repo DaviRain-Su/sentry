@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — app shell, navigation, crash orchestration
+   Sentry — app shell, navigation, crash orchestration
    =========================================================== */
 import { useState, useEffect, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -797,7 +797,7 @@ export default function App({ onExit }) {
                 handle: ownerShort,
                 addr: ownerShort,
                 fullAddr: owner,
-                provider: liveMode ? (currentWallet?.name || 'Sui wallet') : 'RescueGrid Worker',
+                provider: liveMode ? (currentWallet?.name || 'Sui wallet') : 'Sentry Worker',
                 network: 'Sui Testnet',
               } : RG.account}
               onNav={setView}

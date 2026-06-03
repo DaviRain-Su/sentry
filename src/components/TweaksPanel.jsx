@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — Tweaks panel
+   Sentry — Tweaks panel
    Reusable tweak shell + form-control helpers, adapted from the
    design handoff to run standalone (a floating launcher button
    replaces the design tool's host edit-mode protocol).

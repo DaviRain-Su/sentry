@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — Sleek dark fintech design system
+   Sentry — Sleek dark fintech design system
    neon-on-near-black, glassy, high-contrast
    =========================================================== */
 
@@ -33,7 +33,7 @@
   --t3: #3A454F;
 
   /* brand / semantic */
-  --accent: #2EE6CE;          /* rescuegrid teal-mint — primary neon */
+  --accent: #2EE6CE;          /* sentry teal-mint — primary neon */
   --accent-dim: rgba(46, 230, 206, 0.14);
   --accent-glow: rgba(46, 230, 206, 0.45);
   --sui: #5AA6FF;             /* sui blue — secondary */

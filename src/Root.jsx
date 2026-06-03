@@ -33,7 +33,7 @@ function AppRoute() {
   return (
     <Suspense fallback={
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: 'var(--t2)', fontFamily: 'var(--f-mono)', fontSize: 13 }}>Loading RescueGrid…</div>
+        color: 'var(--t2)', fontFamily: 'var(--f-mono)', fontSize: 13 }}>Loading Sentry…</div>
     }>
       <AppBundle onExit={() => navigate({ to: '/' })} />
     </Suspense>

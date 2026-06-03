@@ -150,7 +150,7 @@ export function decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, exec
   if (mandate.revoked) return readinessBlock({ action: 'stopped_revoked', code: 'POLICY_REVOKED', detail: 'Mandate revoked on-chain; halting.' })
   if (nowMs >= Number(mandate.expires_at_ms)) return readinessBlock({ action: 'stopped_expired', code: 'POLICY_EXPIRED', detail: 'Mandate expired; halting.' })
   if (expectedAgentId && (wrapper.agent !== expectedAgentId || mandate.agent !== expectedAgentId)) {
-    return readinessBlock({ code: 'WRONG_AGENT', detail: 'Execution blocked: policy agent does not match the configured RescueGrid agent.' })
+    return readinessBlock({ code: 'WRONG_AGENT', detail: 'Execution blocked: policy agent does not match the configured Sentry agent.' })
   }
   if (expectedPoolId && wrapper.pool_id !== expectedPoolId) {
     return readinessBlock({ code: 'WRONG_POOL', detail: 'Execution blocked: policy pool is outside the configured execution scope.' })

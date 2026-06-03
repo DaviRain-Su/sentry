@@ -1,4 +1,4 @@
-// Generate (or reuse) the dedicated RescueGrid agent keypair, stored only in
+// Generate (or reuse) the dedicated Sentry agent keypair, stored only in
 // worker/.dev.vars (gitignored) as AGENT_KEY. Prints the address only.
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'

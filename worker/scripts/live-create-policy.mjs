@@ -1,6 +1,6 @@
 // Broadcast a REAL create_policy on testnet, signed by the dedicated agent key
 // (agent doubles as owner for this verification — the contract allows it).
-// Proves the live write path end-to-end: mint Mandate + RescuePolicyWrapper,
+// Proves the live write path end-to-end: mint Mandate + SentryPolicyWrapper,
 // emit PolicyCreated. No DBUSDC needed (only the ~0.01 SUI MoveGate fee).
 //   node scripts/live-create-policy.mjs
 import { strategyHash } from '../src/strategy-core.js'
@@ -32,6 +32,6 @@ const res = await client.signAndExecuteTransaction({
 })
 console.log('status:', res.effects?.status?.status, '| digest:', res.digest)
 console.log('PolicyCreated:', readPolicyCreated(res))
-const w = (res.objectChanges || []).find(o => o.objectType?.endsWith('::policy::RescuePolicyWrapper'))
+const w = (res.objectChanges || []).find(o => o.objectType?.endsWith('::policy::SentryPolicyWrapper'))
 console.log('wrapper object id:', w?.objectId)
 process.exit(res.effects?.status?.status === 'success' ? 0 : 1)

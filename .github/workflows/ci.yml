@@ -85,6 +85,6 @@ jobs:
         working-directory: move/movegate
         run: sui move test
 
-      - name: Test RescueGrid
-        working-directory: move/rescuegrid
+      - name: Test Sentry
+        working-directory: move/sentry
         run: sui move test

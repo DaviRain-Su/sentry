@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — New Strategy flow (intent → policy)
+   Sentry — New Strategy flow (intent → policy)
    =========================================================== */
 import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'

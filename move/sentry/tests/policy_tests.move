@@ -13,7 +13,7 @@ use movegate::passport::{Self, AgentRegistry, AgentPassport};
 use movegate::treasury::{Self, FeeConfig, ProtocolTreasury};
 use movegate::receipt::{Self, ActionReceipt};
 
-use rescuegrid::policy::{Self, RescuePolicyWrapper};
+use rescuegrid::policy::{Self, SentryPolicyWrapper};
 
 const OWNER: address = @0xA1;
 const AGENT: address = @0xB2;
@@ -106,7 +106,7 @@ fun test_create_then_record_happy() {
     ts::next_tx(&mut scenario, AGENT);
     {
         let mut mandate = ts::take_shared<Mandate>(&scenario);
-        let mut wrapper = ts::take_shared<RescuePolicyWrapper>(&scenario);
+        let mut wrapper = ts::take_shared<SentryPolicyWrapper>(&scenario);
         let mut pp = ts::take_shared<AgentPassport>(&scenario);
         let mut ar = ts::take_shared<AgentRegistry>(&scenario);
 
@@ -168,7 +168,7 @@ fun test_revoke_happy() {
 
     ts::next_tx(&mut scenario, OWNER);
     {
-        let mut wrapper = ts::take_shared<RescuePolicyWrapper>(&scenario);
+        let mut wrapper = ts::take_shared<SentryPolicyWrapper>(&scenario);
         let mut mandate = ts::take_shared<Mandate>(&scenario);
         let mut mr = ts::take_shared<MandateRegistry>(&scenario);
         let mut pp = ts::take_shared<AgentPassport>(&scenario);

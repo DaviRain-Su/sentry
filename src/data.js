@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — mock data layer
+   Sentry — mock data layer
    =========================================================== */
 import { attachMarketData } from './market-data.js'
 
@@ -287,7 +287,7 @@ export const RG = {
     maxEpoch: 614,
     sessionExpires: '~36h',
     ephemeralKey: 'ed25519 · 0x4c8d…71ab',
-    gas: { sponsored: 47, saved: 0.0421, station: 'RescueGrid Gas Station' },
+    gas: { sponsored: 47, saved: 0.0421, station: 'Sentry Gas Station' },
     // connected centralized exchanges (read + trade, never withdraw)
     exchanges: [
       { id: 'binance', name: 'Binance', c: '#F0B90B', status: 'connected',    balance: 8420.00, perms: 'Read · Trade', withdraw: false, key: 'bnb_••••7c2a' },

@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — landing / pitch page
+   Sentry — landing / pitch page
    =========================================================== */
 import { useEffect, useRef } from 'react'
 
@@ -69,7 +69,7 @@ export function Landing({ onLaunch }) {
         <nav className="lp-nav">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {logoSvg}
-            <span className="display" style={{ fontWeight: 700, fontSize: 16 }}>RescueGrid</span>
+            <span className="display" style={{ fontWeight: 700, fontSize: 16 }}>Sentry</span>
           </div>
           <div className="lp-nav-links">
             <a href="#how">How it works</a>
@@ -86,9 +86,9 @@ export function Landing({ onLaunch }) {
             <div>
               <div className="badge badge-accent reveal" style={{ marginBottom: 22 }}><span className="dot pulse"></span>Sui Overflow 2026 · Agentic Web</div>
               <h1 className="h1 reveal">Autonomous DeFi rescue,<br/>on a <span style={{ color: 'var(--accent)' }}>leash you control</span>.</h1>
-              <p className="lead reveal">RescueGrid is an AI agent that monitors your positions, decides, and executes real trades on Deepbook — strictly inside a Move Policy Object you authorize once. Truly autonomous, never able to go rogue.</p>
+              <p className="lead reveal">Sentry is an AI agent that monitors your positions, decides, and executes real trades on Deepbook — strictly inside a Move Policy Object you authorize once. Truly autonomous, never able to go rogue.</p>
               <div className="cta-row reveal">
-                <a href="#" onClick={launch} className="btn btn-primary btn-lg">Launch RescueGrid</a>
+                <a href="#" onClick={launch} className="btn btn-primary btn-lg">Launch Sentry</a>
                 <a href="#how" className="btn btn-lg">See how it works</a>
               </div>
               <div className="kpi-strip reveal">
@@ -186,7 +186,7 @@ export function Landing({ onLaunch }) {
             <div style={{ padding: 46 }}>
               <div className="badge badge-sui" style={{ marginBottom: 18 }}>Why Sui</div>
               <h2 className="sec-title" style={{ fontSize: 32 }}>The Move Policy Object<br/>is the whole point.</h2>
-              <p style={{ color: 'var(--t1)', fontSize: 15, marginTop: 16, lineHeight: 1.6 }}>On Sui, authority is an <strong style={{ color: 'var(--t0)' }}>object you own</strong>. RescueGrid gives the agent a scoped capability — never your keys. Limits aren't a promise in our backend; they're enforced by Move at execution time.</p>
+              <p style={{ color: 'var(--t1)', fontSize: 15, marginTop: 16, lineHeight: 1.6 }}>On Sui, authority is an <strong style={{ color: 'var(--t0)' }}>object you own</strong>. Sentry gives the agent a scoped capability — never your keys. Limits aren't a promise in our backend; they're enforced by Move at execution time.</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 24 }}>
                 {[
                   [<strong key="s" style={{ color: 'var(--t0)' }}>Self-enforced budget</strong>, ' — the agent asserts remaining budget on-chain before every order.'],
@@ -282,7 +282,7 @@ export function Landing({ onLaunch }) {
             <h2 className="sec-title" style={{ fontSize: 36 }}>See the rescue happen live.</h2>
             <p className="sec-sub" style={{ margin: '14px auto 0' }}>Open the dashboard and trigger a flash crash — watch the agent buy the dip inside policy, no signature required.</p>
             <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 30, flexWrap: 'wrap' }}>
-              <a href="#" onClick={launch} className="btn btn-primary btn-lg">Launch RescueGrid</a>
+              <a href="#" onClick={launch} className="btn btn-primary btn-lg">Launch Sentry</a>
               <a href="#" onClick={launch} className="btn btn-lg">Try the flash-crash demo</a>
             </div>
           </div>
@@ -293,7 +293,7 @@ export function Landing({ onLaunch }) {
           <div className="wrap" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <svg width="26" height="26" viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="28" height="28" rx="8" fill="#06231f" stroke="#2EE6CE" strokeOpacity="0.5"/><path d="M9 19 l4-5 3 3 4-6" stroke="#2EE6CE" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="23" cy="11" r="2.2" fill="#2EE6CE"/></svg>
-              <span className="display" style={{ fontWeight: 700 }}>RescueGrid</span>
+              <span className="display" style={{ fontWeight: 700 }}>Sentry</span>
             </div>
             <div className="mono" style={{ fontSize: 12, color: 'var(--t2)' }}>Sui wallet · Move Policy Object · PTB · Deepbook v3 · Cloudflare Workers</div>
           </div>

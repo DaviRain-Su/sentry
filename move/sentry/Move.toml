@@ -1,5 +1,5 @@
 [package]
-name = "rescuegrid"
+name = "sentry"
 version = "0.1.0"
 edition = "2024.beta"
 
@@ -8,4 +8,4 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 movegate = { local = "../movegate" }
 
 [addresses]
-rescuegrid = "0x0"
+sentry = "0x0"

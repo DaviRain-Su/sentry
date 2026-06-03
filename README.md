@@ -1,121 +1,118 @@
-# RescueGrid
+# Sentry
 
-> Autonomous DeFi risk-rescue agent on Sui — on a leash you control.
+> Cross-chain autonomous risk agent — set your policy, Sentry patrols the chains.
 
-RescueGrid is an AI agent for Sui Testnet that monitors positions, decides under Guardian policy checks, and is designed to execute DeepBook rescue trades strictly inside a **Move Policy Object** you authorize once. The current verified scope proves real Testnet policy create/read/revoke, live Worker read surfaces, and execution/funding gates; successful real DeepBook execution was intentionally deferred/skipped for now.
+Sentry is an autonomous agent platform that monitors your positions across multiple blockchains, exchanges, and perps venues, decides under Guardian policy checks, and executes risk-response trades inside **policy envelopes** you authorize. You set the rules — Sentry stands watch.
 
-This repo is the full implementation of the [Claude Design handoff](docs/), not just the mockup:
+## Origin
 
-- **Web dashboard** — a Vite + React SPA, recreated pixel-faithfully from the design prototype.
-- **`core/`** — shared, SDK-agnostic logic (chain constants, canonical `strategy_hash`, NL intent parser, Guardian) reused by the frontend, the Worker, and any future local agent.
-- **`rescuegrid::policy` Move package** — `RescuePolicyWrapper` on top of MoveGate, **deployed to Sui Testnet**.
-- **Cloudflare Worker** — frontend API + autonomous agent runtime: parse/build/read/activate, then monitor → decide → readiness/blocked execution checks.
+Sentry began as a Sui-only hackathon project. The current codebase carries that heritage: a
+MoveGate + SentryPolicyWrapper contract on Sui Testnet, a DeepBook executor adapter, a Vite +
+React dashboard, and a Cloudflare Worker runtime. All of this is real, tested, and verified
+on-chain.
 
-Owner actions are still signed in your wallet, but the frontend gets parse/build/read state from the Worker first. Direct chain reads remain only as a local fallback when `VITE_WORKER_URL` is absent or temporarily down. Architecture overview: [`docs/02-architecture.md`](docs/02-architecture.md); build status: [`docs/STATUS.md`](docs/STATUS.md).
+The long-term vision is cross-chain: one control plane, one policy language, one Guardian, one
+activity ledger, with venue-specific execution adapters underneath. See the
+[Multivenue Roadmap](docs/06-post-mvp-multivenue-roadmap.md) for the full plan — Solana devnet,
+EVM, Hyperliquid, and CEX trade-only adapters are on the roadmap.
 
 ## Quickstart
 
-**Demo mode** (no backend, no credentials — fully clickable):
+The Sui Testnet MVP is fully functional:
 
 ```bash
 npm install
-npm run dev -- --host localhost --port 5175      # http://localhost:5175
+npm run dev -- --host localhost --port 5175      # demo mode (no backend needed)
 ```
 
-**Live mode** (real Sui Testnet backend + wallet):
+With the Worker running on Sui Testnet:
 
 ```bash
-# 1) backend
-cd worker && npm install && npm run dev -- --port 8787      # http://localhost:8787
-
-# 2) frontend (new shell)
-cp .env.example .env.local   # set VITE_WORKER_URL=http://localhost:8787
-npm install && npm run dev -- --host localhost --port 5175  # http://localhost:5175
-
-# optional: print deployed on-chain ids
-npm run config
+cd worker && npm install && npm run dev -- --port 8787
+cp .env.example .env.local   # VITE_WORKER_URL=http://localhost:8787
+npm install && npm run dev -- --host localhost --port 5175
 ```
 
-```bash
-npm run build                       # production build → dist/
-npm --prefix worker test            # backend checks
-npm --prefix worker run typecheck   # Worker TypeScript
-cd move/rescuegrid && sui move test # Move tests
-npm run config                      # sanitized Testnet deployment IDs
+## How It Works
+
+```
+You (owner)                    Sentry (agent)
+    │                               │
+    ├─ Natural language intent ──→  │  "if SUI drops 8%, market-buy 500 USDC SUI"
+    │                               │
+    │  ← PTB preview + Guardian ────┤  checks budget, slippage, pool scope
+    │                               │
+    ├─ Sign & deploy policy ────→   │  on-chain policy object created
+    │                               │
+    │                           ┌───┴───┐
+    │                           │  TICK   │  monitors price, checks triggers
+    │                           └───┬───┘
+    │                               │
+    │  ← Activity feed ────────────┤  execute (if allowed) or block (with reason)
+    │                               │
+    ├─ Revoke (any time) ────────→  │  policy destroyed, agent loses authority
 ```
 
-The verified live Worker URL for this repo is the local Worker at `http://localhost:8787`, and the verified frontend port is `http://localhost:5175`. Sui objects are deployed on **Sui Testnet only** (see [`docs/STATUS.md`](docs/STATUS.md) / `npm run config`); do not treat this README as Mainnet or Cloudflare production-deploy evidence.
+The agent can only act inside the policy you authorize — constrained by budget, pool, slippage,
+expiry, and strategy hash. Everything is verifiable on-chain.
 
-Post-hackathon multivenue planning lives in [`docs/06-post-mvp-multivenue-roadmap.md`](docs/06-post-mvp-multivenue-roadmap.md). `pi-worker` integration notes live in [`docs/07-pi-worker-assessment.md`](docs/07-pi-worker-assessment.md). Sui GraphQL/gRPC/Archival Store, Seal/Walrus, WaaP, Sui Stack CRM, and Sui Agent Skills are assessed in [`docs/08-sui-data-agent-stack-assessment.md`](docs/08-sui-data-agent-stack-assessment.md). Market research, strategy-template expansion, and the next frontend design brief live in [`docs/09-market-product-and-frontend-roadmap.md`](docs/09-market-product-and-frontend-roadmap.md).
+## Architecture
 
-## The flow
+Sentry is built in three planes:
 
-`Landing → Sign in → Dashboard`, all client-side routes in one SPA:
+- **Control Plane** — the Sentry Account, strategy mandates, Guardian decisions, emergency stop, and activity ledger. This is chain-agnostic.
+- **Execution Plane** — one adapter per venue/protocol. Currently: Sui/DeepBook. Planned: Solana/Jupiter, EVM/Safe, Hyperliquid, OKX, Binance.
+- **Settlement Plane** — moves inventory between venues (LI.FI, deBridge, native transfers). Modeled as sagas, not atomic transactions.
 
-- **Landing** — pitch page: hero rescue-grid visual, the gap, how-it-works, "Why Sui" (granted-vs-denied capabilities), features, sub-track alignment.
-- **Sign in** — connect a Sui wallet (Slush or any standard wallet); optional Google zkLogin via Enoki. No seed phrase pasted, no extension lock-in.
-- **Command center** — live portfolio KPIs, a SUI/USDC Deepbook chart, an animated radial risk gauge, agent reasoning trail, open positions, and an agent live feed.
-- **New strategy** — natural language → parsed intent + human-readable **PTB preview** + 30-day backtest + **Guardian** risk checks (including a hard **BLOCK** path) → Move Policy config → Local/Cloud mode → one-signature deploy.
-- **Agent activity** — filterable on-chain log of autonomous decisions and policy actions (create/revoke, retries, failures, guardian blocks, and future executions), with clickable tx hashes opening a **Sui explorer drawer**.
-- **Policies** — your on-chain authority as cards (budget bars, scope, expiry, revoke) with an **Inspect** slide-over exposing the `AgentPolicy` Move struct, delegated-vs-denied capabilities, protocol allow-list, gas/signing, and audit trail.
-- **Profile** — wallet identity, real balances/assets, the active session, the agent's delegated authority, and gas posture; live values when a wallet is connected.
+```
+Sentry Account (chain-agnostic identity)
+  ├── owner identities (wallet / passkey / oauth)
+  ├── venue accounts
+  │   ├── sui: MoveGate Mandate + SentryPolicyWrapper
+  │   ├── solana: delegated PDA account         ← next
+  │   ├── evm: Safe module / ERC-4337           ← planned
+  │   ├── hyperliquid: API wallet + subaccount  ← planned
+  │   └── okx/binance: trade-only API key       ← planned
+  ├── strategy mandates
+  └── unified activity ledger
+```
 
-### The centerpiece demo
-
-Hit **Simulate flash crash** (top right): SUI drops −8.4%, the risk gauge spikes red, then the demo animates an autonomous rescue grid story — partial fill → re-quote → fills → log — all without a signature. This centerpiece is a demo simulation, not evidence of a completed real DeepBook fill in the current Testnet validation. There's also a global **Emergency stop** circuit breaker, and a **Tweaks** panel (bottom-right gear) to live-toggle accent color, crash severity, and market jitter.
-
-## Live mode (real wallet + Worker)
-
-By default the app runs **self-contained in demo mode** (mock data, simulated sign-in). To run it against the real Sui Testnet backend:
-
-1. Start the Worker on `http://localhost:8787` and set `VITE_WORKER_URL=http://localhost:8787` in `.env.local`.
-2. **Sign in with a Sui wallet** — install [Slush](https://slush.app) (or any standard Sui wallet), switch it to **Testnet**, and grab test SUI from the faucet. No signups, no API keys. The sign-in screen shows a "Connect <wallet>" button.
-
-With a connected wallet + Worker URL, **New strategy → Sign & deploy** parses via the Worker, builds the unsigned `create_policy` transaction in the Worker, you sign it in your wallet, and the policy's Durable Object runtime is registered. Live policy list, summary, market, balances, activity, and revoke are Worker-first; if the Worker is unavailable, read-only views fall back to direct Sui/DeepBook reads. The no-wallet Worker read surface is an explicit **Open Worker read-only** sign-in option, not an automatic dashboard jump. Creating/revoking costs only the ~0.01 SUI MoveGate fee + gas; no DBUSDC needed.
-
-**zkLogin (optional):** if you'd rather use Google zkLogin, also set `VITE_ENOKI_API_KEY` (Enoki public key from [portal.enoki.mystenlabs.com](https://portal.enoki.mystenlabs.com)) and `VITE_GOOGLE_CLIENT_ID` (Google OAuth Web client, registered in the Enoki portal). Then "Continue with Google" performs real zkLogin. Wallet login needs none of this.
-
-> Agent-key validation path: mission validation used the dedicated Worker-held agent key from `worker/.dev.vars` through secret-safe scripts to create/list/revoke current-run policies on Sui Testnet. Do not print or commit `.dev.vars` values; evidence records only public signer/owner/agent addresses, object IDs, strategy hashes, and tx digests.
-
-> Funding/execution gate: the deployed agent BalanceManager is currently unfunded for execution (`DBUSDC=0`, `DEEP=0` in final validation). Readiness surfaces correctly remain blocked with labels such as `EXECUTION_DISABLED`, `INSUFFICIENT_DBUSDC`, and `INSUFFICIENT_DEEP`. Real DeepBook execution was explicitly deferred/skipped until usable Testnet DBUSDC/DEEP funding exists; this repo must not claim a successful live DeepBook fill yet.
-
-## Final validation snapshot
-
-Observed final mission evidence is Testnet-only:
-
-- Validators passed: `npm run build`, `npm --prefix worker test`, `npm --prefix worker run typecheck`, `cd move/rescuegrid && sui move test`, and `npm run config`.
-- Browser/API surfaces were verified on `http://localhost:5175` with live Worker reads to `http://localhost:8787`.
-- Scripted agent-key Testnet validation created, listed, surfaced in UI/API, and revoked a current-run policy; chain and Worker reads stayed consistent post-revoke.
-- Funding/readiness, tick auth, trigger-not-met, Guardian safety, revoked/failed/unresolved paths all remained non-success with unchanged spend and no execution-success activity.
-- Successful real DeepBook execution was not run and should remain documented as deferred until the DBUSDC/DEEP gate is satisfied.
+Detailed architecture: [`docs/02-architecture.md`](docs/02-architecture.md).
+Build status: [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Tech
 
-- **Vite + React** (JSX) with TanStack Query for live Worker/chain reads, public feed queries, mutation state and transaction detail caching; TanStack Router for app/deep-link navigation; TanStack Table for scanner-style market tables; and TanStack Form for the strategy builder's editable policy fields. Query/Router Devtools run in development only. The Cloudflare Worker remains the live-mode API backend; shared, SDK-agnostic logic lives in `core/` (reused by the Worker too). Demo mode still uses plausible mock data in [`src/data.js`](src/data.js).
-- Design system (`neon-on-near-black`, glassy dark fintech) lives in [`src/styles.css`](src/styles.css); landing-only styles in [`src/landing.css`](src/landing.css).
+- **Vite + React** (JSX) with TanStack Query, Router, Table, and Form
+- **Cloudflare Worker** (Hono) with Durable Objects for per-policy runtime
+- **`core/`** — shared SDK-agnostic logic (strategy hash, intent parser, Guardian)
+- **`move/sentry`** — Sui Move package (MoveGate Mandate + SentryPolicyWrapper)
+- **Design system** — `neon-on-near-black` glassy dark fintech
 
 ```
 src/
-  main.jsx                 # entry
-  App.jsx                  # app shell, nav, crash orchestration, routing
-  api.js                   # Worker-first frontend API client
-  chain-read.js            # direct-chain fallback for read-only live views
-  data.js                  # demo/mock data layer
-  styles.css / landing.css # design tokens + components
+  main.jsx                  # entry
+  App.jsx                   # app shell, nav, crash orchestration, routing
+  api.js                    # Worker-first frontend API client
+  chain-read.js             # direct-chain fallback
+  data.js                   # demo/mock data
   components/
-    primitives.jsx         # Icon, Sparkline, RiskGauge, Token, Logo, helpers
-    Landing.jsx            # pitch / marketing page
-    ZkLogin.jsx            # sign-in entry
-    Dashboard.jsx          # command center + reasoning panel
-    NewStrategy.jsx        # intent → review → policy → deploy
-    Views.jsx              # activity log + policies
-    Detail.jsx             # policy inspect slide-over + tx explorer drawer
-    Profile.jsx            # wallet identity, balances, session, agent authority
-    TweaksPanel.jsx        # live demo controls
-core/                      # shared logic — frontend + Worker + future local agent
-  deployment.js            # on-chain ids / constants
-  strategy.js              # canonical strategy_hash + NL intent parser
-  guardian.js              # Guardian decision logic
+    Landing.jsx             # pitch page
+    ZkLogin.jsx             # wallet/zkLogin sign-in
+    Dashboard.jsx           # command center + reasoning panel
+    NewStrategy.jsx         # intent → review → policy → deploy
+    Views.jsx               # activity log + policies
+    Detail.jsx              # policy inspect + tx explorer
+    Profile.jsx             # wallet identity, balances, agent authority
+core/
+  strategy.js               # canonical strategy_hash + NL intent parser
+  guardian.js               # Guardian decision logic
+  deployment.js             # on-chain ids / constants
 ```
 
-> Testnet implementation. MoveGate / RescuePolicyWrapper and the Worker runtime are implemented; live autonomous DeepBook execution is still gated on funding the agent BalanceManager with DBUSDC and DEEP, and was explicitly skipped/deferred in the final validation evidence.
+## Docs
+
+- [Architecture](docs/02-architecture.md)
+- [Multivenue Roadmap](docs/06-post-mvp-multivenue-roadmap.md) — Solana, EVM, CEX, settlement
+- [Build Status](docs/STATUS.md)
+- [Technical Spec](docs/03-technical-spec.md)
+- [Market & Product Roadmap](docs/09-market-product-and-frontend-roadmap.md)

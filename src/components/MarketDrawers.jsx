@@ -1,4 +1,4 @@
-/* RescueGrid — PoolDrawer + AgentRuntimeDrawer (ported from design detail.jsx) */
+/* Sentry — PoolDrawer + AgentRuntimeDrawer (ported from design detail.jsx) */
 import { useState, Fragment } from 'react'
 import { RG } from '../data.js'
 import { Icon, ProtoGlyph, Sparkline, fmtTvlM } from './primitives.jsx'
@@ -223,7 +223,7 @@ export function AgentRuntimeDrawer({ mode, onClose, onToast }) {
             </div>
             {r.status === 'online'
               ? <div style={{ textAlign: 'right' }}><div className="mono display" style={{ fontSize: 16, fontWeight: 600 }}>{r.watching}</div><div style={{ fontSize: 10, color: 'var(--t2)' }}>policies live</div></div>
-              : <button className="btn btn-sm btn-primary" onClick={() => onToast && onToast('Copy: npx rescuegrid-agent --local', 'var(--accent)')}><Icon name="cpu" size={13} /> Start</button>}
+              : <button className="btn btn-sm btn-primary" onClick={() => onToast && onToast('Copy: npx sentry-agent --local', 'var(--accent)')}><Icon name="cpu" size={13} /> Start</button>}
           </div>
 
           {/* live loop metric (cloud) */}

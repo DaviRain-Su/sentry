@@ -1,5 +1,5 @@
 // E4 — read on-chain state and aggregate policy activity.
-// Chain (MoveGate Mandate + RescuePolicyWrapper + events) is the final source
+// Chain (MoveGate Mandate + SentryPolicyWrapper + events) is the final source
 // of truth (docs §7 GET .../activity, §8 chain-wins). runtime_state is derived
 // from chain here; once the Durable Object (E5) runs it supplies the live state
 // and runtime_state_stale flips when it disagrees with chain.
@@ -7,7 +7,7 @@ import { getClient, DEPLOYMENT } from './sui-tx.js'
 import { Transaction } from '@mysten/sui/transactions'
 import { bytesToHex, enrichPolicyFromChain } from './read-surfaces.js'
 
-const RG = DEPLOYMENT.rescuegrid
+const RG = DEPLOYMENT.sentry
 
 function fields(obj) {
   return obj?.data?.content?.dataType === 'moveObject' ? obj.data.content.fields : null

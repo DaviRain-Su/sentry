@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — sign-in screen
+   Sentry — sign-in screen
    Sui wallet login (Slush / any standard wallet, no credentials).
    A separate "Explore the demo" entry runs the app on mock data.
    =========================================================== */
@@ -41,7 +41,7 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
             The AI agent that <span style={{ color: 'var(--accent)' }}>trades for you</span> — and can't go rogue.
           </h1>
           <p style={{ fontSize: 16, color: 'var(--t1)', marginTop: 20, lineHeight: 1.6, maxWidth: 460 }}>
-            Authorize once with a Move Policy Object. RescueGrid then monitors, decides and executes real trades on Deepbook — strictly inside the budget and scope you set on-chain.
+            Authorize once with a Move Policy Object. Sentry then monitors, decides and executes real trades on Deepbook — strictly inside the budget and scope you set on-chain.
           </p>
           <div style={{ display: 'flex', gap: 26, marginTop: 36 }}>
             {[

@@ -1,8 +1,8 @@
-# RescueGrid Test Spec v1.0
+# Sentry Test Spec v1.0
 
 状态：Draft
 日期：2026-06-01
-定位：RescueGrid：自主 DeFi 风险响应 Agent
+定位：Sentry：自主 DeFi 风险响应 Agent
 原则：测试先于生产实现；实现偏离本文件时，先改规格再改测试和代码。
 
 ## 1. Test Layers
@@ -21,9 +21,9 @@
 
 Happy path:
 
-- owner 创建有效 Policy（同时创建 MoveGate Mandate + RescuePolicyWrapper），事件 `PolicyCreated` 包含 `mandate_id` 和 `wrapper_id`。
+- owner 创建有效 Policy（同时创建 MoveGate Mandate + SentryPolicyWrapper），事件 `PolicyCreated` 包含 `mandate_id` 和 `wrapper_id`。
 - `budget_ceiling > 0` 且 `max_slippage_bps <= MAX_ALLOWED_SLIPPAGE_BPS` 创建成功。
-- 创建后的 `RescuePolicyWrapper` 是 shared object，MoveGate Mandate 也必须可被授权 agent 后续无 owner co-sign 引用。
+- 创建后的 `SentryPolicyWrapper` 是 shared object，MoveGate Mandate 也必须可被授权 agent 后续无 owner co-sign 引用。
 - `mandate_id` 在 Wrapper 中正确关联。
 - MoveGate creation fee payment、FeeConfig、ProtocolTreasury、MandateRegistry、AgentRegistry 和 AgentPassport 参数全部正确传入。
 
@@ -62,7 +62,7 @@ Error / attack:
 Happy path:
 
 - 正确 pool_id、预算、滑点、agent 匹配时通过。
-- 注意：agent/revoked/expiry 由 MoveGate `authorize_action` 层检验，`assert_policy_valid` 只检查 RescueGrid 特有约束。
+- 注意：agent/revoked/expiry 由 MoveGate `authorize_action` 层检验，`assert_policy_valid` 只检查 Sentry 特有约束。
 
 Boundary:
 
@@ -98,7 +98,7 @@ Error / attack:
 - 超预算 abort。
 - 撤销后记录 abort（MoveGate AuthToken 无法从已撤销 Mandate 获得）。
 - AuthToken 来源不是当前 Policy 关联的 Mandate abort。
-- AuthToken protocol 不是 `RESCUEGRID_PROTOCOL_ADDRESS` abort。
+- AuthToken protocol 不是 `SENTRY_PROTOCOL_ADDRESS` abort。
 - AuthToken amount 不等于 `quote_amount_spent` abort。
 
 ### Guardian block runtime log
@@ -148,7 +148,7 @@ Happy path:
 Error:
 
 - `confirmed=false` 拒绝。
-- `strategy.agent` 不等于部署配置 `RESCUEGRID_AGENT_ADDRESS` 时拒绝。
+- `strategy.agent` 不等于部署配置 `SENTRY_AGENT_ADDRESS` 时拒绝。
 - strategy hash 不匹配拒绝。
 - 活跃 Policy 数达到 `MAX_ACTIVE_POLICIES_PER_DEPLOYMENT` 时返回 `ACTIVE_POLICY_LIMIT_REACHED`。
 - Sui transaction 失败时不激活 Durable Object。
@@ -168,7 +168,7 @@ Error:
 
 Happy path:
 
-- 返回 MoveGate Mandate snapshot、RescuePolicyWrapper snapshot、runtime state、events。
+- 返回 MoveGate Mandate snapshot、SentryPolicyWrapper snapshot、runtime state、events。
 - budget 数字以字符串返回，避免 JS integer loss。
 - 当链上状态与 Durable Object runtime state 冲突时，链上状态优先，`runtime_state_stale=true`。
 
@@ -184,7 +184,7 @@ Happy path:
 - trigger false 返回 `action=no_op`。
 - trigger true 且检查通过返回 `action=executed` 和 tx digest。
 - tick 必须通过 adapter registry 选择 `deepbook` adapter；不能直接调用 Deepbook-specific runtime code。
-- 内部 token 有效且 `RESCUEGRID_DEMO_MODE=true` 时，`force_trigger=true` 可以绕过自然市场触发条件。
+- 内部 token 有效且 `SENTRY_DEMO_MODE=true` 时，`force_trigger=true` 可以绕过自然市场触发条件。
 
 Blocked:
 
@@ -201,7 +201,7 @@ Error:
 - unknown executor 返回 `UNSUPPORTED_EXECUTOR`，不提交交易。
 - Deepbook transaction failed 返回 `error`，不更新成功状态。
 - 缺失或错误 internal token 时返回 `401` 或 `403`，不运行 tick。
-- 生产部署或 `RESCUEGRID_DEMO_MODE=false` 时提交 `force_trigger=true` 返回 `FORCE_TRIGGER_DISABLED`。
+- 生产部署或 `SENTRY_DEMO_MODE=false` 时提交 `force_trigger=true` 返回 `FORCE_TRIGGER_DISABLED`。
 
 ## 4. Guardian Tests
 
@@ -255,19 +255,19 @@ Advisory:
 
 1. Deploy Move package to Sui Testnet.
 2. Create Policy with test owner and agent.
-3. Read MoveGate Mandate and RescuePolicyWrapper, then verify linked fields.
+3. Read MoveGate Mandate and SentryPolicyWrapper, then verify linked fields.
 4. Revoke Policy.
 5. Confirm subsequent `authorize_action` + trade record aborts.
 
 ### Agent autonomous execution
 
-1. Create active Policy with sufficient Testnet budget（MoveGate Mandate + RescuePolicyWrapper）。
+1. Create active Policy with sufficient Testnet budget（MoveGate Mandate + SentryPolicyWrapper）。
 2. Activate Durable Object runtime.
 3. In automated tests, use a dev-only mock price feed or `force_trigger=true` test hook to satisfy the trigger condition; natural market movement is not required.
 4. Run agent tick.
 5. Confirm Deepbook transaction digest exists.
 6. Confirm `AgentTradeExecuted` event exists with correct `mandate_id` and `wrapper_id`.
-7. Confirm `spent_amount` increased in RescuePolicyWrapper.
+7. Confirm `spent_amount` increased in SentryPolicyWrapper.
 8. Confirm MoveGate ActionReceipt was created（`freeze_object`）。
 9. Confirm MoveGate Mandate `spent_this_epoch` and `total_actions` updated.
 
@@ -359,8 +359,8 @@ Passing criteria:
 
 These tests are not MVP gates, but they define the composability target.
 
-- `rescuegrid daemon run` loads local agent config and starts periodic ticks.
-- `rescuegrid daemon status` shows agent address, chain, registered adapters and watched policies.
+- `sentry daemon run` loads local agent config and starts periodic ticks.
+- `sentry daemon status` shows agent address, chain, registered adapters and watched policies.
 - daemon uses the same Runtime Core and ExecutorAdapter registry as Cloud Agent.
 - daemon refuses to run when the local agent address does not match the Policy Mandate agent.
 - daemon writes local activity logs and can recover after restart without double-submitting an already confirmed action.

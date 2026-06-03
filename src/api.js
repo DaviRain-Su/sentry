@@ -1,4 +1,4 @@
-// Frontend client for the RescueGrid Worker API.
+// Frontend client for the Sentry Worker API.
 // Configure VITE_WORKER_URL to point at the deployed/dev Worker. Reads are
 // Worker-first and fall back to direct chain reads when the Worker is absent or
 // temporarily unavailable; writes require the Worker contract.
@@ -14,7 +14,7 @@ function workerMissing() {
   return {
     status: 'error',
     code: 'WORKER_NOT_CONFIGURED',
-    message: 'Set VITE_WORKER_URL to use the RescueGrid Worker.',
+    message: 'Set VITE_WORKER_URL to use the Sentry Worker.',
   }
 }
 

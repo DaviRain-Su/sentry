@@ -14,7 +14,7 @@ Sources checked:
 
 These links are useful, but they should not all enter the same product layer.
 
-| Source | RescueGrid value | When to use |
+| Source | Sentry value | When to use |
 | --- | --- | --- |
 | Sui GraphQL / gRPC / Archival Store | Production data-read migration and better activity/history queries | Start soon. JSON-RPC is a dated dependency risk. |
 | Seal + Walrus | Encrypted strategy snapshots, private agent notes, long-lived audit artifacts | Post-MVP privacy/audit layer. Do not store wallet keys. |
@@ -26,7 +26,7 @@ These links are useful, but they should not all enter the same product layer.
 
 Sui's 2026 data-stack direction is clear: production apps should move away from JSON-RPC toward the new stack of gRPC, GraphQL RPC, and Archival Store. The Sui Foundation blog says JSON-RPC will be deactivated on **July 31, 2026**.
 
-Current RescueGrid impact:
+Current Sentry impact:
 
 - `src/chain-read.js` uses raw JSON-RPC from the browser.
 - `worker/src/chain.js` reads via the Sui TypeScript SDK client, which still depends on RPC-style fullnode access.
@@ -47,7 +47,7 @@ Do not wire the frontend directly to GraphQL as the main production path. The Wo
 
 Seal is a decentralized secrets management service. Its access control is defined and validated on Sui, while encrypted data can live on Walrus or other storage. It emphasizes client-side encryption and warns that it is not a KMS and should not be used for wallet keys or highly sensitive regulated secrets.
 
-Current RescueGrid impact:
+Current Sentry impact:
 
 - We currently store strategy metadata on-chain via `strategy_hash`, and runtime status through events and Worker state.
 - We do not have private strategy notes, private backtest metadata, or durable encrypted agent reasoning traces.
@@ -60,7 +60,7 @@ Recommended direction:
 - Dashboard decrypts user-private records client-side when the owner is authorized.
 - Worker can write public activity and non-sensitive runtime telemetry; private notes should be opt-in.
 
-Useful RescueGrid artifacts for Seal/Walrus:
+Useful Sentry artifacts for Seal/Walrus:
 
 - original natural-language strategy text,
 - full parsed Strategy JSON,
@@ -71,7 +71,7 @@ Useful RescueGrid artifacts for Seal/Walrus:
 
 ## 3. Sui Stack CRM reference
 
-The `sui-stack-crm` project is valuable because it demonstrates the exact Sui Stack pattern RescueGrid might need later:
+The `sui-stack-crm` project is valuable because it demonstrates the exact Sui Stack pattern Sentry might need later:
 
 - browser encrypts payload with Seal,
 - stores ciphertext as Walrus content-addressed blobs,
@@ -79,14 +79,14 @@ The `sui-stack-crm` project is valuable because it demonstrates the exact Sui St
 - uses Sui ACL logic to decide who can decrypt,
 - renders history from Sui events instead of a centralized app database.
 
-RescueGrid translation:
+Sentry translation:
 
 - `PolicyPrivateRecord` can mirror the CRM's table/payload pattern.
 - Each policy can point to encrypted Walrus blobs for strategy notes and private execution context.
 - Versioned updates can become on-chain events, giving "what changed, when" provenance.
 - Optimistic concurrency from the CRM save flow maps well to strategy-edit UX: if the policy version changed, refresh and ask the user to re-apply edits.
 
-This is not needed for the current hackathon-critical path. It becomes useful when RescueGrid needs private strategy history, team/shared policies, or persistent research notes.
+This is not needed for the current hackathon-critical path. It becomes useful when Sentry needs private strategy history, team/shared policies, or persistent research notes.
 
 ## 4. WaaP for Agents
 
@@ -100,9 +100,9 @@ WaaP's agent model:
 - high-risk operations can trigger user approval,
 - two-party signing avoids a single full private key held by the agent process.
 
-RescueGrid position:
+Sentry position:
 
-- WaaP can complement MoveGate + RescuePolicyWrapper, not replace them.
+- WaaP can complement MoveGate + SentryPolicyWrapper, not replace them.
 - MoveGate + Wrapper remain the Sui on-chain enforcement layer.
 - WaaP-like signing can become an `ExternalSignerAdapter` for production mainnet mode.
 - It is especially interesting for multivenue expansion, where EVM and Sui need a common signer/approval abstraction.
@@ -130,7 +130,7 @@ Mainnet hardening path:
 
 Sui Agent Skills are not a product dependency. They are a development workflow upgrade.
 
-Relevant skills for RescueGrid work:
+Relevant skills for Sentry work:
 
 - `accessing-data`: chain reads, subscriptions, indexing, Walrus blobs.
 - `ptbs`: Programmable Transaction Block composition.
@@ -159,7 +159,7 @@ Post-MVP architecture:
 1. Use Seal + Walrus for encrypted private policy records.
 2. Use the Sui Stack CRM pattern for versioned encrypted blobs and Sui ACL.
 3. Add `SignerAdapter` with WaaP/local/hardware signer options.
-4. Keep MoveGate + RescuePolicyWrapper as the on-chain policy boundary.
+4. Keep MoveGate + SentryPolicyWrapper as the on-chain policy boundary.
 5. Add Sui Agent Skills to the engineering setup for faster, more consistent Sui work.
 
 What not to do:

@@ -2,22 +2,22 @@
 
 Date: 2026-06-02
 
-Purpose: turn market research into concrete RescueGrid product and frontend design work.
+Purpose: turn market research into concrete Sentry product and frontend design work.
 
 ## 1. Market map
 
-RescueGrid should not position itself as a generic DeFi dashboard. The stronger positioning is:
+Sentry should not position itself as a generic DeFi dashboard. The stronger positioning is:
 
 > policy-constrained autonomous execution for DeFi strategies that are too time-sensitive, multi-step, or risk-sensitive to manage manually.
 
 Comparable products fall into six buckets.
 
-| Bucket | Examples | What they prove | Gap RescueGrid can own |
+| Bucket | Examples | What they prove | Gap Sentry can own |
 | --- | --- | --- | --- |
 | AI trading agents | Cod3x, HeyAnon, Mode AI Terminal | Users want natural-language DeFi/trading workflows and live execution feeds. | Safer execution, explicit on-chain policy, Guardian, revocation. |
 | Automation / risk managers | DeFi Saver | Liquidation protection, stop-loss, take-profit and leverage automation are proven user needs. | Bring this to Sui + agent policy objects + strategy templates. |
 | Yield aggregators / vaults | Beefy, Yearn, Sommelier | Users accept automated strategy vaults when yield, risk and fees are easy to inspect. | Let users own the policy instead of blindly depositing into a vault. |
-| On-chain asset management | Enzyme, Morpho Vaults | Configurable vault policies, caps, asset/protocol allow-lists and curator controls matter. | Convert these controls into RescueGrid mandates and Guardian rules. |
+| On-chain asset management | Enzyme, Morpho Vaults | Configurable vault policies, caps, asset/protocol allow-lists and curator controls matter. | Convert these controls into Sentry mandates and Guardian rules. |
 | Perps / funding / basis products | Hyperliquid vaults, Ethena, Bluefin, funding-arb vaults | Delta-neutral and funding/basis strategies are a major demand area. | Strategy builder + net exposure proof + funding flip guard + venue caps. |
 | Sui DeFi primitives | DeepBook, Cetus DLMM, Scallop, NAVI, Suilend, Bluefin | Sui has spot liquidity, LP, lending and perps components. | A unified policy-constrained agent layer across those protocols. |
 
@@ -81,7 +81,7 @@ The frontend should evolve from one "rescue grid" demo into a strategy catalog.
 
 12. **Vault Copy / Strategy Index**
     - Enzyme/Morpho/Hyperliquid-vault-style browseable strategies.
-    - Later, once RescueGrid has enough native strategies to compare.
+    - Later, once Sentry has enough native strategies to compare.
 
 13. **Cross-Venue Inventory Rebalancer**
     - Uses bridge/settlement adapters, not hot-path arbitrage.
@@ -97,7 +97,7 @@ Current UI proves one policy and one Sui/DeepBook flow. To present the larger pr
 
 ### A. Strategy Marketplace
 
-Purpose: show RescueGrid is a platform, not a single strategy.
+Purpose: show Sentry is a platform, not a single strategy.
 
 Required components:
 
@@ -232,7 +232,7 @@ Purpose: make future multi-venue work understandable.
 Required modules:
 
 - linked Sui wallet;
-- MoveGate/RescueGrid policy object;
+- MoveGate/Sentry policy object;
 - cloud agent address;
 - local daemon status;
 - future Hyperliquid agent wallet;
@@ -320,7 +320,7 @@ Reasoning:
 - Do not show APY without yield decomposition and time window.
 - Do not hide bridge/CEX/perps custody differences under a single "account" abstraction.
 - Do not let strategy cards imply execution support before adapters exist.
-- Do not make the UI all about charts; RescueGrid's moat is policy, Guardian and execution auditability.
+- Do not make the UI all about charts; Sentry's moat is policy, Guardian and execution auditability.
 
 ## 7. Design handoff checklist
 

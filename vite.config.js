@@ -17,7 +17,7 @@ function cleanEmptyIsSelectors() {
 }
 cleanEmptyIsSelectors.postcss = true
 
-// RescueGrid dashboard — single-page React app
+// Sentry dashboard — single-page React app
 export default defineConfig({
   base: process.env.VITE_BASE_URL || '/',
   plugins: [react(), tailwindcss()],

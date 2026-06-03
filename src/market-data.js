@@ -1,5 +1,5 @@
 /* ===========================================================
-   RescueGrid — extra mock data for Markets / Strategy catalog /
+   Sentry — extra mock data for Markets / Strategy catalog /
    Risk center / Active strategy / Data sources pages.
    Ported verbatim from the Claude Design handoff bundle
    (agentc-web/project/data.js). Real-data wiring lives in the
@@ -188,7 +188,7 @@ export function attachMarketData(RG) {
       metric: { l: 'Rate', v: 'fixed' }, adapters: ['Pendle'], risks: ['contract'], capital: '—' },
     { id: 'vault-index', name: 'Vault Copy / Strategy Index', cat: 'Rebalance', status: 'soon', scenario: null, icon: 'layers',
       blurb: 'Browse and follow curated strategies vault-style, once enough native strategies exist to compare.',
-      metric: { l: 'Mode', v: 'copy' }, adapters: ['RescueGrid'], risks: ['venue'], capital: '—' },
+      metric: { l: 'Mode', v: 'copy' }, adapters: ['Sentry'], risks: ['venue'], capital: '—' },
     { id: 'watchtower', name: 'Alert-Only Watchtower', cat: 'Watchtower', status: 'available', scenario: null, watch: true, icon: 'eye',
       blurb: 'Monitor any market or position with zero execution authority — then upgrade to an autonomous policy when ready.',
       metric: { l: 'Authority', v: 'none' }, adapters: ['all venues'], risks: [], capital: 'free' },
@@ -546,7 +546,7 @@ export function attachMarketData(RG) {
       mode: 'cloud', label: 'Cloud agent', icon: 'cloud', status: 'online',
       host: 'Cloudflare Worker + Durable Object', region: 'auto · nearest edge', uptime: '14d 06h',
       llm: 'Claude · server-side', heartbeat: '2s ago', loopMs: 850, tick: 'every 8s',
-      watching: 3, gas: { station: 'RescueGrid Gas Station', bal: 4.81, unit: 'SUI' },
+      watching: 3, gas: { station: 'Sentry Gas Station', bal: 4.81, unit: 'SUI' },
       privacy: 'Decision logic runs on our edge; only signed txns hit chain.',
       tags: ['always-on', 'zero-setup', 'sponsored gas'],
       health: [
@@ -566,7 +566,7 @@ export function attachMarketData(RG) {
       mode: 'local', label: 'Local agent', icon: 'cpu', status: 'offline',
       host: 'Your machine · daemon', region: 'localhost:8787', uptime: '—',
       llm: 'Ollama / Claude Desktop · BYO', heartbeat: 'never', loopMs: null, tick: 'every 8s',
-      watching: 0, gas: { station: 'RescueGrid Gas Station', bal: 4.81, unit: 'SUI' },
+      watching: 0, gas: { station: 'Sentry Gas Station', bal: 4.81, unit: 'SUI' },
       privacy: 'Decision logic never leaves your machine — maximum privacy.',
       tags: ['private', 'BYO LLM', 'self-hosted'],
       health: [
@@ -577,7 +577,7 @@ export function attachMarketData(RG) {
       ],
       log: [
         { t: '—', d: 'Daemon offline · cloud is currently handling all policies' },
-        { t: 'setup', d: 'Run: npx rescuegrid-agent --local to start the daemon' },
+        { t: 'setup', d: 'Run: npx sentry-agent --local to start the daemon' },
       ],
     },
   };

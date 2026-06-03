@@ -235,7 +235,7 @@ async function assertBlockedPlan({ name, policy, proposed, expectedCode, mandate
 assert(DEPLOYMENT.chain === expectedChain, 'Deployment is not configured for Sui Testnet', { chain: DEPLOYMENT.chain })
 assert(String(DEPLOYMENT.rpc).includes('testnet'), 'Deployment RPC is not Testnet', { rpc: DEPLOYMENT.rpc })
 const workerRoot = await getJson('/')
-assert(workerRoot.service === 'rescuegrid-worker', 'Worker root did not identify rescuegrid-worker', workerRoot)
+assert(workerRoot.service === 'sentry-worker', 'Worker root did not identify sentry-worker', workerRoot)
 
 const currentClockMs = await readClockTimestampMs(client)
 assert(Number.isFinite(currentClockMs), 'Sui Clock timestamp was not readable')

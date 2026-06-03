@@ -92,7 +92,7 @@ export function parseIntent(text, owner, defaults = {}, nowMs = Date.now()) {
   if (budgetNum >= 1000) guardian_warnings.push({ code: 6, level: 'warn', label: 'Capital concentration', detail: 'Large budget routes to a single pair — consider splitting scope.' })
 
   const ptb_preview = [
-    `Create MoveGate Mandate and RescuePolicyWrapper for owner ${owner}`,
+    `Create MoveGate Mandate and SentryPolicyWrapper for owner ${owner}`,
     `Allow agent ${AGENT_ADDRESS} to trade only pool ${strategy.pool_id}`,
     `Set budget ceiling to ${budgetNum} USDC`,
     `Set max slippage to ${(max_slippage_bps / 100).toFixed(2)}%`,
