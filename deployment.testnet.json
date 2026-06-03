@@ -29,9 +29,23 @@
     "package_id": "0xfb28c4cbc6865bd1c897d26aecbe1f8792d1509a20ffec692c800660cbec6982",
     "dbusdc_coin_type": "0xf7152c05930480cd740d7311b5b8b45c6f488e3a53a11c3f74a6fac36a52e0d7::DBUSDC::DBUSDC",
     "pools": {
-      "SUI_DBUSDC": { "pool_id": "0x1c19362ca52b8ffd7a33cee805a67d40f31e6ba303753fd3a4cfdfacea7163a5", "base": "0x2::sui::SUI", "base_decimals": 9, "quote_decimals": 6 },
-      "DEEP_DBUSDC": { "pool_id": "0xe86b991f8632217505fd859445f9803967ac84a9d4a1219065bf191fcb74b622", "base": "0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP", "base_decimals": 6, "quote_decimals": 6 },
-      "WAL_DBUSDC": { "pool_id": "0xeb524b6aea0ec4b494878582e0b78924208339d360b62aec4a8ecd4031520dbb", "base_decimals": 9, "quote_decimals": 6 }
+      "SUI_DBUSDC": {
+        "pool_id": "0x1c19362ca52b8ffd7a33cee805a67d40f31e6ba303753fd3a4cfdfacea7163a5",
+        "base": "0x2::sui::SUI",
+        "base_decimals": 9,
+        "quote_decimals": 6
+      },
+      "DEEP_DBUSDC": {
+        "pool_id": "0xe86b991f8632217505fd859445f9803967ac84a9d4a1219065bf191fcb74b622",
+        "base": "0x36dbef866a1d62bf7328989a10fb2f07d769f4ee587c0de4a0a256e57e0a58a8::deep::DEEP",
+        "base_decimals": 6,
+        "quote_decimals": 6
+      },
+      "WAL_DBUSDC": {
+        "pool_id": "0xeb524b6aea0ec4b494878582e0b78924208339d360b62aec4a8ecd4031520dbb",
+        "base_decimals": 9,
+        "quote_decimals": 6
+      }
     },
     "default_pool": "SUI_DBUSDC"
   },

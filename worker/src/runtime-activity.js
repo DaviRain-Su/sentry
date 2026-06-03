@@ -1,4 +1,4 @@
-export const MAX_RUNTIME_ACTIVITY = 50
+export const MAX_RUNTIME_ACTIVITY = 50;
 
 const ACTION_META = {
   activated: {
@@ -36,21 +36,21 @@ const ACTION_META = {
     title: 'Agent tick error',
     detail: 'Runtime tick failed without claiming execution success.',
   },
-}
+};
 
 export function shortWrapperId(wrapperId) {
-  if (!wrapperId || typeof wrapperId !== 'string') return 'runtime'
-  return wrapperId.length > 12 ? `${wrapperId.slice(0, 6)}…${wrapperId.slice(-4)}` : wrapperId
+  if (!wrapperId || typeof wrapperId !== 'string') return 'runtime';
+  return wrapperId.length > 12 ? `${wrapperId.slice(0, 6)}…${wrapperId.slice(-4)}` : wrapperId;
 }
 
 function dateParts(timestampMs) {
-  const ms = Number(timestampMs)
-  const d = Number.isFinite(ms) ? new Date(ms) : new Date()
-  return { date: d.toISOString().slice(0, 10), t: d.toISOString().slice(11, 19) }
+  const ms = Number(timestampMs);
+  const d = Number.isFinite(ms) ? new Date(ms) : new Date();
+  return { date: d.toISOString().slice(0, 10), t: d.toISOString().slice(11, 19) };
 }
 
 function normalizeStringArray(value) {
-  return Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
 /**
@@ -58,14 +58,16 @@ function normalizeStringArray(value) {
  * @param {{wrapperId?: string | null, nowMs?: number}=} options
  */
 export function runtimeEventFromTickResult(result, { wrapperId, nowMs = Date.now() } = {}) {
-  const action = String(result?.action || 'error')
-  const meta = ACTION_META[action] || ACTION_META.error
-  const code = result?.code || result?.blocker_code || null
-  const blockerCodes = normalizeStringArray(result?.blocker_codes || (code ? [code] : []))
-  const blockerLabels = normalizeStringArray(result?.blocker_labels)
-  const detail = String(result?.detail || (blockerLabels.length ? blockerLabels.join('; ') : meta.detail))
-  const txDigest = result?.tx_digest || result?.tx || null
-  const idParts = [nowMs, wrapperId || 'unknown', action, txDigest || code || 'runtime']
+  const action = String(result?.action || 'error');
+  const meta = ACTION_META[action] || ACTION_META.error;
+  const code = result?.code || result?.blocker_code || null;
+  const blockerCodes = normalizeStringArray(result?.blocker_codes || (code ? [code] : []));
+  const blockerLabels = normalizeStringArray(result?.blocker_labels);
+  const detail = String(
+    result?.detail || (blockerLabels.length ? blockerLabels.join('; ') : meta.detail)
+  );
+  const txDigest = result?.tx_digest || result?.tx || null;
+  const idParts = [nowMs, wrapperId || 'unknown', action, txDigest || code || 'runtime'];
   return {
     id: idParts.map(String).join(':'),
     source: 'runtime',
@@ -88,7 +90,7 @@ export function runtimeEventFromTickResult(result, { wrapperId, nowMs = Date.now
     spend_before: result?.spend_before || null,
     spend_after: result?.spend_after || null,
     balances: result?.balances || null,
-  }
+  };
 }
 
 /**
@@ -96,27 +98,30 @@ export function runtimeEventFromTickResult(result, { wrapperId, nowMs = Date.now
  * @param {{wrapperId?: string | null, nowMs?: number}=} options
  */
 export function runtimeErrorEvent(error, { wrapperId, nowMs = Date.now() } = {}) {
-  return runtimeEventFromTickResult({
-    action: 'error',
-    code: 'RUNTIME_ERROR',
-    blocker_code: 'RUNTIME_ERROR',
-    blocker_codes: ['RUNTIME_ERROR'],
-    blocker_labels: ['Runtime error'],
-    detail: `Runtime error: ${String(error?.message || error)}`,
-    execution_claimed: false,
-  }, { wrapperId, nowMs })
+  return runtimeEventFromTickResult(
+    {
+      action: 'error',
+      code: 'RUNTIME_ERROR',
+      blocker_code: 'RUNTIME_ERROR',
+      blocker_codes: ['RUNTIME_ERROR'],
+      blocker_labels: ['Runtime error'],
+      detail: `Runtime error: ${String(error?.message || error)}`,
+      execution_claimed: false,
+    },
+    { wrapperId, nowMs }
+  );
 }
 
 export function appendRuntimeActivity(events, event, max = MAX_RUNTIME_ACTIVITY) {
-  const prior = Array.isArray(events) ? events : []
-  return [event, ...prior].slice(0, max)
+  const prior = Array.isArray(events) ? events : [];
+  return [event, ...prior].slice(0, max);
 }
 
 export function runtimeEventToFeedItem(event, policyLabel = shortWrapperId(event?.wrapper_id)) {
-  const action = String(event?.action || 'error')
-  const meta = ACTION_META[action] || ACTION_META.error
-  const { date, t } = dateParts(event?.timestamp_ms)
-  const spendDelta = event?.spend_delta != null ? Number(event.spend_delta) / 1e6 : 0
+  const action = String(event?.action || 'error');
+  const meta = ACTION_META[action] || ACTION_META.error;
+  const { date, t } = dateParts(event?.timestamp_ms);
+  const spendDelta = event?.spend_delta != null ? Number(event.spend_delta) / 1e6 : 0;
   return {
     t,
     date,
@@ -134,9 +139,11 @@ export function runtimeEventToFeedItem(event, policyLabel = shortWrapperId(event
     blocker_codes: normalizeStringArray(event?.blocker_codes),
     blocker_labels: normalizeStringArray(event?.blocker_labels),
     execution_claimed: Boolean(event?.execution_claimed),
-  }
+  };
 }
 
 export function sortActivityItems(items) {
-  return [...(Array.isArray(items) ? items : [])].sort((a, b) => Number(b.timestamp_ms || 0) - Number(a.timestamp_ms || 0))
+  return [...(Array.isArray(items) ? items : [])].sort(
+    (a, b) => Number(b.timestamp_ms || 0) - Number(a.timestamp_ms || 0)
+  );
 }

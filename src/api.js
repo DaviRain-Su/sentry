@@ -2,20 +2,20 @@
 // Configure VITE_WORKER_URL to point at the deployed/dev Worker. Reads are
 // Worker-first and fall back to direct chain reads when the Worker is absent or
 // temporarily unavailable; writes require the Worker contract.
-import * as chainRead from './chain-read.js'
+import * as chainRead from './chain-read.js';
 
-const BASE = import.meta.env.VITE_WORKER_URL || ''
+const BASE = import.meta.env.VITE_WORKER_URL || '';
 
-export const WORKER_CONFIGURED = !!BASE
+export const WORKER_CONFIGURED = !!BASE;
 export const ENOKI_CONFIGURED =
-  !!import.meta.env.VITE_ENOKI_API_KEY && !!import.meta.env.VITE_GOOGLE_CLIENT_ID
+  !!import.meta.env.VITE_ENOKI_API_KEY && !!import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 function workerMissing() {
   return {
     status: 'error',
     code: 'WORKER_NOT_CONFIGURED',
     message: 'Set VITE_WORKER_URL to use the Sentry Worker.',
-  }
+  };
 }
 
 async function parseJson(res) {
@@ -23,58 +23,62 @@ async function parseJson(res) {
     status: 'error',
     code: 'BAD_RESPONSE',
     message: `Worker returned HTTP ${res.status}.`,
-  }))
+  }));
   if (!res.ok && json.status !== 'error') {
-    return { status: 'error', code: `HTTP_${res.status}`, message: `Worker returned HTTP ${res.status}.` }
+    return {
+      status: 'error',
+      code: `HTTP_${res.status}`,
+      message: `Worker returned HTTP ${res.status}.`,
+    };
   }
-  return json
+  return json;
 }
 
 async function post(path, body) {
-  if (!WORKER_CONFIGURED) return workerMissing()
+  if (!WORKER_CONFIGURED) return workerMissing();
   const res = await fetch(BASE + path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  })
-  return parseJson(res)
+  });
+  return parseJson(res);
 }
 
 async function workerGet(path) {
-  if (!WORKER_CONFIGURED) throw new Error('Worker not configured.')
-  const res = await fetch(BASE + path)
-  const json = await parseJson(res)
-  if (json.status === 'error') throw new Error(json.message || json.code || 'Worker read failed.')
-  return json
+  if (!WORKER_CONFIGURED) throw new Error('Worker not configured.');
+  const res = await fetch(BASE + path);
+  const json = await parseJson(res);
+  if (json.status === 'error') throw new Error(json.message || json.code || 'Worker read failed.');
+  return json;
 }
 
 async function read(path, fallback) {
   if (!WORKER_CONFIGURED) {
-    const result = await fallback()
-    return { ...result, source: 'chain_fallback', worker_error: 'WORKER_NOT_CONFIGURED' }
+    const result = await fallback();
+    return { ...result, source: 'chain_fallback', worker_error: 'WORKER_NOT_CONFIGURED' };
   }
   try {
-    const result = await workerGet(path)
-    return { ...result, source: 'worker' }
+    const result = await workerGet(path);
+    return { ...result, source: 'worker' };
   } catch (e) {
-    const result = await fallback()
-    return { ...result, source: 'chain_fallback', worker_error: String(e?.message || e) }
+    const result = await fallback();
+    return { ...result, source: 'chain_fallback', worker_error: String(e?.message || e) };
   }
 }
 
 /** POST /api/intents/parse — NL -> structured strategy + hash + preview. */
 export function parseIntent(owner, text, defaults = {}) {
-  return post('/api/intents/parse', { owner, text, defaults })
+  return post('/api/intents/parse', { owner, text, defaults });
 }
 
 /** POST /api/policies — returns { tx_json } unsigned tx for zkLogin signing. */
 export function buildPolicyTx(owner, strategy, strategy_hash) {
-  return post('/api/policies', { owner, strategy, strategy_hash, confirmed: true })
+  return post('/api/policies', { owner, strategy, strategy_hash, confirmed: true });
 }
 
 /** POST /api/policies/:id/activate — register the Durable Object runtime. */
 export function activatePolicy(wrapperId) {
-  return post(`/api/policies/${wrapperId}/activate`, {})
+  return post(`/api/policies/${wrapperId}/activate`, {});
 }
 
 /** GET /api/policies/:id/activity — chain-authoritative policy + events. */
@@ -83,46 +87,46 @@ export function getActivity(wrapperId) {
     status: 'error',
     code: WORKER_CONFIGURED ? 'WORKER_READ_FAILED' : 'WORKER_NOT_CONFIGURED',
     message: String(e?.message || e),
-  }))
+  }));
 }
 
 /** GET /api/policies?owner= — policies owned by an address (PolicyCreated events). */
 export function listPolicies(owner) {
-  return read(`/api/policies?owner=${owner}`, () => chainRead.listPolicies(owner))
+  return read(`/api/policies?owner=${owner}`, () => chainRead.listPolicies(owner));
 }
 
 /** GET /api/activity?owner= — merged on-chain activity feed for an owner. */
 export function listActivity(owner) {
-  return read(`/api/activity?owner=${owner}`, () => chainRead.getActivity(owner))
+  return read(`/api/activity?owner=${owner}`, () => chainRead.getActivity(owner));
 }
 
 /** GET /api/summary?owner= — real portfolio aggregates + positions. */
 export function getSummary(owner) {
-  return read(`/api/summary?owner=${owner}`, () => chainRead.getSummary(owner))
+  return read(`/api/summary?owner=${owner}`, () => chainRead.getSummary(owner));
 }
 
 /** GET /api/market — live SUI/DBUSDC price from the DeepBook indexer. */
 export function getMarket() {
-  return read('/api/market', () => chainRead.getMarket())
+  return read('/api/market', () => chainRead.getMarket());
 }
 
 /** GET /api/balances?owner= — real wallet token holdings valued via market. */
 export function getBalances(owner) {
-  return read(`/api/balances?owner=${owner}`, () => chainRead.getBalances(owner))
+  return read(`/api/balances?owner=${owner}`, () => chainRead.getBalances(owner));
 }
 
 /** POST /api/policies/:id/revoke — returns { tx_json } unsigned revoke tx. */
 export function buildRevokeTx(owner, wrapperId) {
-  return post(`/api/policies/${wrapperId}/revoke`, { owner, confirmed: true })
+  return post(`/api/policies/${wrapperId}/revoke`, { owner, confirmed: true });
 }
 
 /** Single tx detail — chain-authoritative, read directly from the fullnode
  *  (no Worker aggregation needed for a single object). */
 export function getTransaction(digest) {
-  return chainRead.getTransaction(digest)
+  return chainRead.getTransaction(digest);
 }
 
 /** Real SUI/USD price history for backtests (public market data, direct). */
 export function getSuiPriceHistory(days = 30) {
-  return chainRead.getSuiPriceHistory(days)
+  return chainRead.getSuiPriceHistory(days);
 }

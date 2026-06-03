@@ -13,9 +13,9 @@ export function validateTickAuthorization({ authorizationHeader, expectedToken }
         message: 'Invalid internal token.',
         execution_claimed: false,
       },
-    }
+    };
   }
-  return { ok: true }
+  return { ok: true };
 }
 
 export function validateForceTrigger({ forceTriggerRequested, demoMode }) {
@@ -34,7 +34,7 @@ export function validateForceTrigger({ forceTriggerRequested, demoMode }) {
         force_trigger_allowed: false,
         execution_claimed: false,
       },
-    }
+    };
   }
-  return { ok: true, forceTrigger: Boolean(forceTriggerRequested) }
+  return { ok: true, forceTrigger: Boolean(forceTriggerRequested) };
 }

@@ -8,10 +8,10 @@
    two coexist. Do NOT switch to the bare `@import "tailwindcss";` — it pulls in
    preflight and breaks the neon native elements. */
 @layer theme, base, components, utilities;
-@import 'tailwindcss/theme.css' layer(theme);
-@import 'tailwindcss/utilities.css' layer(utilities);
-@import '@heroui/react/styles';
-@source '../node_modules/@heroui/react/dist';
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "@heroui/react/styles";
+@source "../node_modules/@heroui/react/dist";
 
 /* Map Sentry's neon accent into HeroUI's theme tokens so HeroUI components
    pick up the brand color instead of the default palette. */
@@ -34,32 +34,53 @@
 /* HeroUI Card renders with class `.card` (same as our neon card → inherits the
    glass gradient + 16px radius) but ships zero padding, so KPI content hugs the
    edge. Restore the design-system inset. */
-.rg-kpi > .card { padding: 16px 18px; }
+.rg-kpi > .card {
+  padding: 16px 18px;
+}
 
 /* Buttons: rein in the 24px pill radius to the design-system 12px (--r-md) and
    give text buttons real horizontal inset (HeroUI sets padding:0 + fixed height). */
-.button { border-radius: var(--r-md); }
-.button--md:not(.button--icon-only) { padding-inline: 15px; }
+.button {
+  border-radius: var(--r-md);
+}
+.button--md:not(.button--icon-only) {
+  padding-inline: 15px;
+}
 
 /* Bordered (secondary) buttons use the neon hi-contrast border, not HeroUI grey. */
-.button--bordered { border-color: var(--border-hi); }
-.button--bordered:hover { background: var(--glass-2); border-color: var(--border-hi); }
+.button--bordered {
+  border-color: var(--border-hi);
+}
+.button--bordered:hover {
+  background: var(--glass-2);
+  border-color: var(--border-hi);
+}
 
 /* Primary actions get the brand glow back (accent + danger), matching .btn-primary. */
 .button--primary.bg-accent {
-  box-shadow: 0 0 0 1px rgba(46, 230, 206, 0.35), 0 8px 24px -8px var(--accent-glow);
+  box-shadow:
+    0 0 0 1px rgba(46, 230, 206, 0.35),
+    0 8px 24px -8px var(--accent-glow);
 }
 .button--primary.bg-accent:hover {
   filter: brightness(1.08);
-  box-shadow: 0 0 0 1px rgba(46, 230, 206, 0.6), 0 10px 30px -8px var(--accent-glow);
+  box-shadow:
+    0 0 0 1px rgba(46, 230, 206, 0.6),
+    0 10px 30px -8px var(--accent-glow);
 }
 .button--primary.bg-danger {
-  box-shadow: 0 0 0 1px rgba(255, 84, 112, 0.35), 0 8px 24px -8px rgba(255, 84, 112, 0.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 84, 112, 0.35),
+    0 8px 24px -8px rgba(255, 84, 112, 0.4);
 }
-.button--primary.bg-danger:hover { filter: brightness(1.06); }
+.button--primary.bg-danger:hover {
+  filter: brightness(1.06);
+}
 
 /* Small text buttons also need horizontal inset (HeroUI sets padding:0). */
-.button--sm:not(.button--icon-only) { padding-inline: 12px; }
+.button--sm:not(.button--icon-only) {
+  padding-inline: 12px;
+}
 
 /* HeroUI v3's `bordered`/`light` variants render NO visible border/background in
    this build, and `.button` (unlayered) zeroes out border/bg — so Tailwind
@@ -70,8 +91,15 @@
   background: var(--glass-2);
   color: var(--t1);
 }
-.button.rg-btn-2:hover { background: var(--glass-hi); color: var(--t0); border-color: var(--border-hi); }
-.button.rg-btn-2[data-disabled], .button.rg-btn-2:disabled { opacity: 0.5; }
+.button.rg-btn-2:hover {
+  background: var(--glass-hi);
+  color: var(--t0);
+  border-color: var(--border-hi);
+}
+.button.rg-btn-2[data-disabled],
+.button.rg-btn-2:disabled {
+  opacity: 0.5;
+}
 
 /* Danger-tinted secondary (risky chip, simulate-crash). */
 .button.rg-btn-danger-2 {
@@ -79,8 +107,16 @@
   background: var(--danger-dim);
   color: var(--danger);
 }
-.button.rg-btn-danger-2:hover { filter: brightness(1.08); }
-.button.rg-btn-danger-2[data-disabled], .button.rg-btn-danger-2:disabled { opacity: 0.4; }
+.button.rg-btn-danger-2:hover {
+  filter: brightness(1.08);
+}
+.button.rg-btn-danger-2[data-disabled],
+.button.rg-btn-danger-2:disabled {
+  opacity: 0.4;
+}
 
 /* Ghost icon/text buttons: keep transparent, add a hover wash so they react. */
-.button.rg-btn-ghost:hover { background: var(--glass-2); color: var(--t0); }
+.button.rg-btn-ghost:hover {
+  background: var(--glass-2);
+  color: var(--t0);
+}

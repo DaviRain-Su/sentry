@@ -13,7 +13,7 @@ export const GUARDIAN_REASON = {
   CONCENTRATION: 6,
   MANDATE_MISMATCH: 7,
   AGENT_MISMATCH: 8,
-}
+};
 
 export const GUARDIAN_BLOCKER_CODE = {
   [GUARDIAN_REASON.SLIPPAGE]: 'OVER_SLIPPAGE',
@@ -23,7 +23,7 @@ export const GUARDIAN_BLOCKER_CODE = {
   [GUARDIAN_REASON.POOL_MISMATCH]: 'WRONG_POOL',
   [GUARDIAN_REASON.MANDATE_MISMATCH]: 'MANDATE_MISMATCH',
   [GUARDIAN_REASON.AGENT_MISMATCH]: 'WRONG_AGENT',
-}
+};
 
 /**
  * @param {object} a
@@ -34,41 +34,92 @@ export const GUARDIAN_BLOCKER_CODE = {
  * @returns {{decision:'allow'|'block', reason?:number, code?:string, label:string, detail:string, remaining:string, concentration_pct?:number, warnings?:object[]}}
  */
 export function runGuardian({ mandate, wrapper, proposed, nowMs }) {
-  const ceiling = BigInt(wrapper.budget_ceiling)
-  const spent = BigInt(wrapper.spent_amount)
-  const remaining = ceiling > spent ? ceiling - spent : 0n
-  const amount = BigInt(proposed.amount)
-  const expires = Number(mandate.expires_at_ms)
+  const ceiling = BigInt(wrapper.budget_ceiling);
+  const spent = BigInt(wrapper.spent_amount);
+  const remaining = ceiling > spent ? ceiling - spent : 0n;
+  const amount = BigInt(proposed.amount);
+  const expires = Number(mandate.expires_at_ms);
 
-  const block = (reason, label, detail) => ({ decision: 'block', reason, code: GUARDIAN_BLOCKER_CODE[reason], label, detail, remaining: remaining.toString() })
+  const block = (reason, label, detail) => ({
+    decision: 'block',
+    reason,
+    code: GUARDIAN_BLOCKER_CODE[reason],
+    label,
+    detail,
+    remaining: remaining.toString(),
+  });
 
   // Order per docs §9 pseudocode.
   if (wrapper.mandate_id !== mandate.id)
-    return block(GUARDIAN_REASON.MANDATE_MISMATCH, 'Mandate/wrapper mismatch', 'wrapper.mandate_id != mandate.id')
+    return block(
+      GUARDIAN_REASON.MANDATE_MISMATCH,
+      'Mandate/wrapper mismatch',
+      'wrapper.mandate_id != mandate.id'
+    );
   if (wrapper.agent && mandate.agent && wrapper.agent !== mandate.agent)
-    return block(GUARDIAN_REASON.AGENT_MISMATCH, 'Agent mismatch', 'wrapper.agent != mandate.agent')
+    return block(
+      GUARDIAN_REASON.AGENT_MISMATCH,
+      'Agent mismatch',
+      'wrapper.agent != mandate.agent'
+    );
   if (proposed.agent_id && wrapper.agent && proposed.agent_id !== wrapper.agent)
-    return block(GUARDIAN_REASON.AGENT_MISMATCH, 'Agent mismatch', 'proposed agent is outside policy scope')
+    return block(
+      GUARDIAN_REASON.AGENT_MISMATCH,
+      'Agent mismatch',
+      'proposed agent is outside policy scope'
+    );
   if (proposed.agent_id && mandate.agent && proposed.agent_id !== mandate.agent)
-    return block(GUARDIAN_REASON.AGENT_MISMATCH, 'Agent mismatch', 'proposed agent is outside mandate scope')
+    return block(
+      GUARDIAN_REASON.AGENT_MISMATCH,
+      'Agent mismatch',
+      'proposed agent is outside mandate scope'
+    );
   if (mandate.revoked)
-    return block(GUARDIAN_REASON.REVOKED, 'Mandate revoked', 'Policy authority has been revoked on-chain.')
+    return block(
+      GUARDIAN_REASON.REVOKED,
+      'Mandate revoked',
+      'Policy authority has been revoked on-chain.'
+    );
   if (nowMs >= expires)
-    return block(GUARDIAN_REASON.EXPIRED, 'Mandate expired', 'Policy expiry reached.')
+    return block(GUARDIAN_REASON.EXPIRED, 'Mandate expired', 'Policy expiry reached.');
   if (remaining <= 0n)
-    return block(GUARDIAN_REASON.BUDGET, 'Budget exhausted', 'No remaining budget.')
+    return block(GUARDIAN_REASON.BUDGET, 'Budget exhausted', 'No remaining budget.');
   if (amount > remaining)
-    return block(GUARDIAN_REASON.BUDGET, 'Budget would exceed ceiling', `amount ${amount} > remaining ${remaining}`)
+    return block(
+      GUARDIAN_REASON.BUDGET,
+      'Budget would exceed ceiling',
+      `amount ${amount} > remaining ${remaining}`
+    );
   if (proposed.estimated_slippage_bps > wrapper.max_slippage_bps)
-    return block(GUARDIAN_REASON.SLIPPAGE, 'Slippage exceeds max', `${proposed.estimated_slippage_bps}bps > ${wrapper.max_slippage_bps}bps cap`)
+    return block(
+      GUARDIAN_REASON.SLIPPAGE,
+      'Slippage exceeds max',
+      `${proposed.estimated_slippage_bps}bps > ${wrapper.max_slippage_bps}bps cap`
+    );
   if (proposed.pool_id !== wrapper.pool_id)
-    return block(GUARDIAN_REASON.POOL_MISMATCH, 'Pool mismatch', 'Proposed pool not in policy scope.')
+    return block(
+      GUARDIAN_REASON.POOL_MISMATCH,
+      'Pool mismatch',
+      'Proposed pool not in policy scope.'
+    );
 
   // Concentration score for the UI — advisory, not a block in MVP.
-  const usedPct = ceiling > 0n ? Number(((spent + amount) * 100n) / ceiling) : 0
-  const warnings = []
+  const usedPct = ceiling > 0n ? Number(((spent + amount) * 100n) / ceiling) : 0;
+  const warnings = [];
   if (usedPct >= 80) {
-    warnings.push({ reason: GUARDIAN_REASON.CONCENTRATION, level: 'warn', label: 'Capital concentration', detail: `${usedPct}% of budget committed after this trade.` })
+    warnings.push({
+      reason: GUARDIAN_REASON.CONCENTRATION,
+      level: 'warn',
+      label: 'Capital concentration',
+      detail: `${usedPct}% of budget committed after this trade.`,
+    });
   }
-  return { decision: 'allow', label: 'Allowed', detail: 'All checks passed.', remaining: remaining.toString(), concentration_pct: usedPct, warnings }
+  return {
+    decision: 'allow',
+    label: 'Allowed',
+    detail: 'All checks passed.',
+    remaining: remaining.toString(),
+    concentration_pct: usedPct,
+    warnings,
+  };
 }

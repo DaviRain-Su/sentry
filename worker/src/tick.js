@@ -1,12 +1,17 @@
 // E7 — agent tick. decideTick() is the pure state-machine core (docs §8);
 // runTick() adds chain I/O + (gated) execution. Allowed actions (docs §7):
 // no_op | blocked | executed | stopped_revoked | stopped_expired | error.
-import { runGuardian } from './guardian.js'
-import { readWrapper, readMandate, readBalanceManagerBalance, readClockTimestampMs } from './chain.js'
-import { buildExecutionTx } from './deepbook.js'
-import { DEPLOYMENT } from './sui-tx.js'
-import { keypairFromWorkerEnv } from './secret-safe-signer.js'
-import { buildFundingReadiness } from './read-surfaces.js'
+import { runGuardian } from './guardian.js';
+import {
+  readWrapper,
+  readMandate,
+  readBalanceManagerBalance,
+  readClockTimestampMs,
+} from './chain.js';
+import { buildExecutionTx } from './deepbook.js';
+import { DEPLOYMENT } from './sui-tx.js';
+import { keypairFromWorkerEnv } from './secret-safe-signer.js';
+import { buildFundingReadiness } from './read-surfaces.js';
 
 export const EXECUTION_BLOCKER_LABELS = {
   EXECUTION_DISABLED: 'Execution disabled',
@@ -25,10 +30,10 @@ export const EXECUTION_BLOCKER_LABELS = {
   UNRESOLVED_TRANSACTION: 'Unresolved transaction',
   INVALID_AUTHORIZATION: 'Invalid authorization',
   FORCE_TRIGGER_DISABLED: 'Force trigger disabled',
-}
+};
 
 function blockerLabel(code) {
-  return EXECUTION_BLOCKER_LABELS[code] ?? code
+  return EXECUTION_BLOCKER_LABELS[code] ?? code;
 }
 
 function readinessBlock({ action = 'blocked', code, detail, extra = {} }) {
@@ -43,10 +48,16 @@ function readinessBlock({ action = 'blocked', code, detail, extra = {} }) {
     execution_claimed: false,
     detail,
     ...extra,
-  }
+  };
 }
 
-function executionNonSuccess({ code = 'UNRESOLVED_TRANSACTION', detail, digest, submitted = false, extra = {} }) {
+function executionNonSuccess({
+  code = 'UNRESOLVED_TRANSACTION',
+  detail,
+  digest,
+  submitted = false,
+  extra = {},
+}) {
   return readinessBlock({
     action: 'error',
     code,
@@ -58,31 +69,37 @@ function executionNonSuccess({ code = 'UNRESOLVED_TRANSACTION', detail, digest, 
       execution_success_evidence: false,
       ...extra,
     },
-  })
+  });
 }
 
 function toBigIntOrNull(value) {
   try {
-    return BigInt(value)
+    return BigInt(value);
   } catch {
-    return null
+    return null;
   }
 }
 
 function tradeEventsForWrapper(events, wrapperId) {
   return (events || []).filter((e) => {
-    if (!String(e.type || '').endsWith('::policy::AgentTradeExecuted')) return false
-    const eventWrapper = e.parsedJson?.wrapper_id ?? e.data?.wrapper_id
-    return eventWrapper === wrapperId
-  })
+    if (!String(e.type || '').endsWith('::policy::AgentTradeExecuted')) return false;
+    const eventWrapper = e.parsedJson?.wrapper_id ?? e.data?.wrapper_id;
+    return eventWrapper === wrapperId;
+  });
 }
 
-export function classifyExecutionResolution({ submitted, resolved, beforeWrapper, afterWrapper, wrapperId }) {
-  const evidence = resolved ?? submitted ?? {}
-  const digest = evidence.digest ?? submitted?.digest
-  const status = evidence.effects?.status?.status
+export function classifyExecutionResolution({
+  submitted,
+  resolved,
+  beforeWrapper,
+  afterWrapper,
+  wrapperId,
+}) {
+  const evidence = resolved ?? submitted ?? {};
+  const digest = evidence.digest ?? submitted?.digest;
+  const status = evidence.effects?.status?.status;
   if (status !== 'success') {
-    const error = evidence.effects?.status?.error
+    const error = evidence.effects?.status?.error;
     return executionNonSuccess({
       code: 'EXECUTION_FAILED',
       detail: `Execution failed: ${error || status || 'Sui RPC did not return successful effects.'}`,
@@ -91,19 +108,20 @@ export function classifyExecutionResolution({ submitted, resolved, beforeWrapper
       extra: {
         effects_status: status ?? null,
       },
-    })
+    });
   }
 
-  const events = tradeEventsForWrapper(evidence.events, wrapperId)
-  const beforeSpent = toBigIntOrNull(beforeWrapper?.spent_amount)
-  const afterSpent = toBigIntOrNull(afterWrapper?.spent_amount)
-  const spendIncreased = beforeSpent != null && afterSpent != null && afterSpent > beforeSpent
-  const hasTradeEvent = events.length > 0
+  const events = tradeEventsForWrapper(evidence.events, wrapperId);
+  const beforeSpent = toBigIntOrNull(beforeWrapper?.spent_amount);
+  const afterSpent = toBigIntOrNull(afterWrapper?.spent_amount);
+  const spendIncreased = beforeSpent != null && afterSpent != null && afterSpent > beforeSpent;
+  const hasTradeEvent = events.length > 0;
 
   if (!hasTradeEvent || !spendIncreased) {
     return executionNonSuccess({
       code: 'UNRESOLVED_TRANSACTION',
-      detail: 'Execution remains unresolved: successful effects alone are not accepted without AgentTradeExecuted event evidence and an on-chain spend increase.',
+      detail:
+        'Execution remains unresolved: successful effects alone are not accepted without AgentTradeExecuted event evidence and an on-chain spend increase.',
       digest,
       submitted: Boolean(digest),
       extra: {
@@ -113,12 +131,13 @@ export function classifyExecutionResolution({ submitted, resolved, beforeWrapper
         spend_before: beforeWrapper?.spent_amount ?? null,
         spend_after: afterWrapper?.spent_amount ?? null,
       },
-    })
+    });
   }
 
   return {
     action: 'executed',
-    detail: 'Rescue order executed with resolved Sui success, AgentTradeExecuted event, and on-chain spend increase.',
+    detail:
+      'Rescue order executed with resolved Sui success, AgentTradeExecuted event, and on-chain spend increase.',
     tx_digest: digest,
     submitted: true,
     readiness_state: 'executed',
@@ -130,7 +149,7 @@ export function classifyExecutionResolution({ submitted, resolved, beforeWrapper
     spend_before: beforeWrapper.spent_amount,
     spend_after: afterWrapper.spent_amount,
     spend_delta: (afterSpent - beforeSpent).toString(),
-  }
+  };
 }
 
 /**
@@ -146,50 +165,98 @@ export function classifyExecutionResolution({ submitted, resolved, beforeWrapper
  * @param {string=} a.expectedPoolId
  * @returns {{action:string, reason?:number, detail:string, guardian?:object}}
  */
-export function decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, executionEnabled, expectedAgentId, expectedPoolId }) {
-  if (mandate.revoked) return readinessBlock({ action: 'stopped_revoked', code: 'POLICY_REVOKED', detail: 'Mandate revoked on-chain; halting.' })
-  if (nowMs >= Number(mandate.expires_at_ms)) return readinessBlock({ action: 'stopped_expired', code: 'POLICY_EXPIRED', detail: 'Mandate expired; halting.' })
+export function decideTick({
+  wrapper,
+  mandate,
+  triggerMet,
+  proposed,
+  nowMs,
+  executionEnabled,
+  expectedAgentId,
+  expectedPoolId,
+}) {
+  if (mandate.revoked)
+    return readinessBlock({
+      action: 'stopped_revoked',
+      code: 'POLICY_REVOKED',
+      detail: 'Mandate revoked on-chain; halting.',
+    });
+  if (nowMs >= Number(mandate.expires_at_ms))
+    return readinessBlock({
+      action: 'stopped_expired',
+      code: 'POLICY_EXPIRED',
+      detail: 'Mandate expired; halting.',
+    });
   if (expectedAgentId && (wrapper.agent !== expectedAgentId || mandate.agent !== expectedAgentId)) {
-    return readinessBlock({ code: 'WRONG_AGENT', detail: 'Execution blocked: policy agent does not match the configured Sentry agent.' })
+    return readinessBlock({
+      code: 'WRONG_AGENT',
+      detail: 'Execution blocked: policy agent does not match the configured Sentry agent.',
+    });
   }
   if (expectedPoolId && wrapper.pool_id !== expectedPoolId) {
-    return readinessBlock({ code: 'WRONG_POOL', detail: 'Execution blocked: policy pool is outside the configured execution scope.' })
+    return readinessBlock({
+      code: 'WRONG_POOL',
+      detail: 'Execution blocked: policy pool is outside the configured execution scope.',
+    });
   }
-  if (!triggerMet) return readinessBlock({ action: 'no_op', code: 'TRIGGER_NOT_MET', detail: 'Trigger condition not met; monitoring.' })
+  if (!triggerMet)
+    return readinessBlock({
+      action: 'no_op',
+      code: 'TRIGGER_NOT_MET',
+      detail: 'Trigger condition not met; monitoring.',
+    });
 
-  const guardian = runGuardian({ mandate, wrapper, proposed, nowMs })
+  const guardian = runGuardian({ mandate, wrapper, proposed, nowMs });
   if (guardian.decision === 'block') {
     return readinessBlock({
       code: guardian.code ?? 'UNRESOLVED_TRANSACTION',
       detail: `Guardian blocked: ${guardian.label} — ${guardian.detail}`,
       extra: { reason: guardian.reason, guardian },
-    })
+    });
   }
   if (!executionEnabled) {
     return readinessBlock({
       code: 'EXECUTION_DISABLED',
-      detail: 'Execution blocked: EXECUTION_ENABLED is false or the agent key is unavailable; usable DBUSDC/DEEP funding must be verified before live execution.',
+      detail:
+        'Execution blocked: EXECUTION_ENABLED is false or the agent key is unavailable; usable DBUSDC/DEEP funding must be verified before live execution.',
       extra: { guardian },
-    })
+    });
   }
-  return { action: 'execute', detail: 'Trigger met + Guardian passed; executing rescue order.', guardian }
+  return {
+    action: 'execute',
+    detail: 'Trigger met + Guardian passed; executing rescue order.',
+    guardian,
+  };
 }
 
-export async function validateExecutionPlan(client, {
-  wrapperId,
-  mandateId,
-  proposed,
-  nowMs = undefined,
-  expectedAgentId,
-  expectedPoolId,
-}) {
-  const wrapper = await readWrapper(client, wrapperId)
-  if (!wrapper) return { action: 'error', code: 'WRAPPER_NOT_FOUND', detail: 'Wrapper not found on-chain.', execution_claimed: false }
-  const clockMs = nowMs ?? await readClockTimestampMs(client)
-  if (!Number.isFinite(clockMs)) return { action: 'error', code: 'CLOCK_UNAVAILABLE', detail: 'Sui Clock timestamp was not readable.', execution_claimed: false }
+export async function validateExecutionPlan(
+  client,
+  { wrapperId, mandateId, proposed, nowMs = undefined, expectedAgentId, expectedPoolId }
+) {
+  const wrapper = await readWrapper(client, wrapperId);
+  if (!wrapper)
+    return {
+      action: 'error',
+      code: 'WRAPPER_NOT_FOUND',
+      detail: 'Wrapper not found on-chain.',
+      execution_claimed: false,
+    };
+  const clockMs = nowMs ?? (await readClockTimestampMs(client));
+  if (!Number.isFinite(clockMs))
+    return {
+      action: 'error',
+      code: 'CLOCK_UNAVAILABLE',
+      detail: 'Sui Clock timestamp was not readable.',
+      execution_claimed: false,
+    };
 
   if (mandateId && mandateId !== wrapper.mandate_id) {
-    const mandate = { id: mandateId, revoked: false, expires_at_ms: String(clockMs + 1), agent: wrapper.agent }
+    const mandate = {
+      id: mandateId,
+      revoked: false,
+      expires_at_ms: String(clockMs + 1),
+      agent: wrapper.agent,
+    };
     const decision = decideTick({
       wrapper,
       mandate,
@@ -199,7 +266,7 @@ export async function validateExecutionPlan(client, {
       executionEnabled: true,
       expectedAgentId,
       expectedPoolId,
-    })
+    });
     return {
       ...decision,
       wrapper_id: wrapperId,
@@ -209,11 +276,17 @@ export async function validateExecutionPlan(client, {
       chain_time_source: 'sui_clock_object_0x6',
       submitted: false,
       execution_claimed: false,
-    }
+    };
   }
 
-  const mandate = await readMandate(client, wrapper.mandate_id)
-  if (!mandate) return { action: 'error', code: 'MANDATE_NOT_FOUND', detail: 'Mandate not found on-chain.', execution_claimed: false }
+  const mandate = await readMandate(client, wrapper.mandate_id);
+  if (!mandate)
+    return {
+      action: 'error',
+      code: 'MANDATE_NOT_FOUND',
+      detail: 'Mandate not found on-chain.',
+      execution_claimed: false,
+    };
   const decision = decideTick({
     wrapper,
     mandate,
@@ -223,10 +296,16 @@ export async function validateExecutionPlan(client, {
     executionEnabled: true,
     expectedAgentId,
     expectedPoolId,
-  })
-  const planDecision = decision.action === 'execute'
-    ? { action: 'validated', readiness_state: 'ready', detail: 'Plan passed Guardian pre-submit validation; no transaction was submitted.', guardian: decision.guardian }
-    : decision
+  });
+  const planDecision =
+    decision.action === 'execute'
+      ? {
+          action: 'validated',
+          readiness_state: 'ready',
+          detail: 'Plan passed Guardian pre-submit validation; no transaction was submitted.',
+          guardian: decision.guardian,
+        }
+      : decision;
   return {
     ...planDecision,
     wrapper_id: wrapperId,
@@ -235,22 +314,22 @@ export async function validateExecutionPlan(client, {
     chain_time_source: 'sui_clock_object_0x6',
     submitted: false,
     execution_claimed: false,
-  }
+  };
 }
 
 /** Per-trade amount: one rung = budget/5, capped at remaining budget. */
 function perTradeAmount(wrapper) {
-  const ceiling = BigInt(wrapper.budget_ceiling)
-  const spent = BigInt(wrapper.spent_amount)
-  const remaining = ceiling > spent ? ceiling - spent : 0n
-  const rung = ceiling / 5n
-  return (rung < remaining ? rung : remaining)
+  const ceiling = BigInt(wrapper.budget_ceiling);
+  const spent = BigInt(wrapper.spent_amount);
+  const remaining = ceiling > spent ? ceiling - spent : 0n;
+  const rung = ceiling / 5n;
+  return rung < remaining ? rung : remaining;
 }
 
 export function fundingReadinessBlock(funding) {
-  const blockers = funding?.execution_blockers ?? funding?.blockers ?? []
-  if (blockers.length === 0) return null
-  const primary = funding.funding_blockers?.[0] ?? blockers[0]
+  const blockers = funding?.execution_blockers ?? funding?.blockers ?? [];
+  if (blockers.length === 0) return null;
+  const primary = funding.funding_blockers?.[0] ?? blockers[0];
   return {
     code: primary.code,
     detail: `Execution blocked: ${blockers.map((b) => b.label).join('; ')}.`,
@@ -266,7 +345,7 @@ export function fundingReadinessBlock(funding) {
     execution_claimed: false,
     blocker_codes: funding.execution_blocker_codes ?? funding.blocker_codes,
     blocker_labels: funding.execution_blocker_labels ?? funding.blocker_labels,
-  }
+  };
 }
 
 async function checkFunding(client, proposed, executionEnabled) {
@@ -274,7 +353,7 @@ async function checkFunding(client, proposed, executionEnabled) {
     readBalanceManagerBalance(client, DEPLOYMENT.deepbook.dbusdc_coin_type),
     readBalanceManagerBalance(client, DEPLOYMENT.deepbook.deep_coin_type),
     client.getBalance({ owner: DEPLOYMENT.agent.address, coinType: '0x2::sui::SUI' }),
-  ])
+  ]);
   const funding = buildFundingReadiness({
     agentAddress: DEPLOYMENT.agent.address,
     balanceManagerId: DEPLOYMENT.agent.balance_manager_id,
@@ -285,8 +364,8 @@ async function checkFunding(client, proposed, executionEnabled) {
     requiredDbusdcBalance: proposed.amount,
     requiredDeepBalance: '1',
     requiredSuiGasMist: '1',
-  })
-  return fundingReadinessBlock(funding)
+  });
+  return fundingReadinessBlock(funding);
 }
 
 /**
@@ -295,62 +374,103 @@ async function checkFunding(client, proposed, executionEnabled) {
  * @param {object} p { wrapperId, forceTrigger, nowMs, market }
  */
 export async function runTick(env, p) {
-  const client = (await import('./sui-tx.js')).getClient()
-  const nowMs = p.nowMs ?? await readClockTimestampMs(client) ?? Date.now()
-  const wrapper = await readWrapper(client, p.wrapperId)
-  if (!wrapper) return { action: 'error', code: 'WRAPPER_NOT_FOUND', detail: 'Wrapper not found on-chain.', execution_claimed: false }
-  const mandate = await readMandate(client, wrapper.mandate_id)
-  if (!mandate) return { action: 'error', code: 'MANDATE_NOT_FOUND', detail: 'Mandate not found on-chain.', execution_claimed: false }
+  const client = (await import('./sui-tx.js')).getClient();
+  const nowMs = p.nowMs ?? (await readClockTimestampMs(client)) ?? Date.now();
+  const wrapper = await readWrapper(client, p.wrapperId);
+  if (!wrapper)
+    return {
+      action: 'error',
+      code: 'WRAPPER_NOT_FOUND',
+      detail: 'Wrapper not found on-chain.',
+      execution_claimed: false,
+    };
+  const mandate = await readMandate(client, wrapper.mandate_id);
+  if (!mandate)
+    return {
+      action: 'error',
+      code: 'MANDATE_NOT_FOUND',
+      detail: 'Mandate not found on-chain.',
+      execution_claimed: false,
+    };
 
   // Trigger: force_trigger (demo) or a real price-drop evaluation supplied by the caller.
-  const triggerMet = !!p.forceTrigger || !!(p.market && p.market.triggerMet)
-  const amount = perTradeAmount(wrapper)
+  const triggerMet = !!p.forceTrigger || !!(p.market && p.market.triggerMet);
+  const amount = perTradeAmount(wrapper);
   const proposed = {
     pool_id: wrapper.pool_id,
     amount: amount.toString(),
-    estimated_slippage_bps: p.market?.estimated_slippage_bps ?? Math.min(80, wrapper.max_slippage_bps),
-  }
-  const executionEnabled = env?.EXECUTION_ENABLED === 'true' && !!env?.AGENT_KEY
+    estimated_slippage_bps:
+      p.market?.estimated_slippage_bps ?? Math.min(80, wrapper.max_slippage_bps),
+  };
+  const executionEnabled = env?.EXECUTION_ENABLED === 'true' && !!env?.AGENT_KEY;
 
-  const expectedPoolId = DEPLOYMENT.deepbook.pools[DEPLOYMENT.deepbook.default_pool]?.pool_id
-  const decision = decideTick({ wrapper, mandate, triggerMet, proposed, nowMs, executionEnabled, expectedAgentId: DEPLOYMENT.agent.address, expectedPoolId })
-  if (decision.action !== 'execute') return { ...decision, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
+  const expectedPoolId = DEPLOYMENT.deepbook.pools[DEPLOYMENT.deepbook.default_pool]?.pool_id;
+  const decision = decideTick({
+    wrapper,
+    mandate,
+    triggerMet,
+    proposed,
+    nowMs,
+    executionEnabled,
+    expectedAgentId: DEPLOYMENT.agent.address,
+    expectedPoolId,
+  });
+  if (decision.action !== 'execute')
+    return { ...decision, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id };
 
-  const fundingBlock = await checkFunding(client, proposed, executionEnabled)
+  const fundingBlock = await checkFunding(client, proposed, executionEnabled);
   if (fundingBlock) {
-    return { action: 'blocked', ...fundingBlock, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
+    return {
+      action: 'blocked',
+      ...fundingBlock,
+      wrapper_id: p.wrapperId,
+      mandate_id: wrapper.mandate_id,
+    };
   }
 
   // execute: build + sign + submit (only reached when executionEnabled)
   try {
-    const kp = keypairFromWorkerEnv(env)
-    const pool = Object.values(DEPLOYMENT.deepbook.pools).find((x) => x.pool_id === wrapper.pool_id)
+    const kp = keypairFromWorkerEnv(env);
+    const pool = Object.values(DEPLOYMENT.deepbook.pools).find(
+      (x) => x.pool_id === wrapper.pool_id
+    );
     const tx = buildExecutionTx({
-      wrapperId: p.wrapperId, mandateId: wrapper.mandate_id,
+      wrapperId: p.wrapperId,
+      mandateId: wrapper.mandate_id,
       balanceManagerId: DEPLOYMENT.agent.balance_manager_id,
-      pool, quoteAmount: proposed.amount, baseReceived: p.market?.baseReceived ?? '0',
-      price: p.market?.price ?? '0', quantity: p.market?.quantity ?? '0',
-      slippageBps: proposed.estimated_slippage_bps, clientOrderId: nowMs, expireMs: nowMs + 3600_000,
-    })
-    const submitted = await client.signAndExecuteTransaction({ signer: kp, transaction: tx, options: { showEffects: true, showEvents: true } })
+      pool,
+      quoteAmount: proposed.amount,
+      baseReceived: p.market?.baseReceived ?? '0',
+      price: p.market?.price ?? '0',
+      quantity: p.market?.quantity ?? '0',
+      slippageBps: proposed.estimated_slippage_bps,
+      clientOrderId: nowMs,
+      expireMs: nowMs + 3600_000,
+    });
+    const submitted = await client.signAndExecuteTransaction({
+      signer: kp,
+      transaction: tx,
+      options: { showEffects: true, showEvents: true },
+    });
     if (!submitted.digest) {
       return {
         ...executionNonSuccess({
-          detail: 'Execution submission did not return a transaction digest; no success is claimed.',
+          detail:
+            'Execution submission did not return a transaction digest; no success is claimed.',
           submitted: false,
         }),
         wrapper_id: p.wrapperId,
         mandate_id: wrapper.mandate_id,
-      }
+      };
     }
 
-    let resolved = submitted
+    let resolved = submitted;
     try {
       if (typeof client.waitForTransaction === 'function') {
         resolved = await client.waitForTransaction({
           digest: submitted.digest,
           options: { showEffects: true, showEvents: true },
-        })
+        });
       }
     } catch (e) {
       return {
@@ -361,14 +481,14 @@ export async function runTick(env, p) {
         }),
         wrapper_id: p.wrapperId,
         mandate_id: wrapper.mandate_id,
-      }
+      };
     }
 
-    let afterWrapper = null
+    let afterWrapper = null;
     try {
-      afterWrapper = await readWrapper(client, p.wrapperId)
+      afterWrapper = await readWrapper(client, p.wrapperId);
     } catch {
-      afterWrapper = null
+      afterWrapper = null;
     }
     const result = classifyExecutionResolution({
       submitted,
@@ -376,8 +496,8 @@ export async function runTick(env, p) {
       beforeWrapper: wrapper,
       afterWrapper,
       wrapperId: p.wrapperId,
-    })
-    return { ...result, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id }
+    });
+    return { ...result, wrapper_id: p.wrapperId, mandate_id: wrapper.mandate_id };
   } catch (e) {
     return {
       ...executionNonSuccess({
@@ -386,6 +506,6 @@ export async function runTick(env, p) {
       }),
       wrapper_id: p.wrapperId,
       mandate_id: wrapper.mandate_id,
-    }
+    };
   }
 }
