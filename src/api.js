@@ -6,6 +6,7 @@ import * as chainRead from './chain-read.js';
 
 const BASE = import.meta.env.VITE_WORKER_URL || '';
 
+export const WORKER_BASE_URL = BASE;
 export const WORKER_CONFIGURED = !!BASE;
 export const ENOKI_CONFIGURED =
   !!import.meta.env.VITE_ENOKI_API_KEY && !!import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -40,6 +41,19 @@ async function post(path, body) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+  return parseJson(res);
+}
+
+async function authed(path, { method = 'GET', token, body } = {}) {
+  if (!WORKER_CONFIGURED) return workerMissing();
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await fetch(BASE + path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   return parseJson(res);
 }
@@ -129,4 +143,63 @@ export function getTransaction(digest) {
 /** Real SUI/USD price history for backtests (public market data, direct). */
 export function getSuiPriceHistory(days = 30) {
   return chainRead.getSuiPriceHistory(days);
+}
+
+/** POST /api/local-agents/pairing — create a short-lived daemon pairing code. */
+export function createLocalAgentPairing({ owner = 'dashboard', device_label } = {}) {
+  return post('/api/local-agents/pairing', { owner, device_label });
+}
+
+/** GET /api/local-agents — list known daemon sessions from the Worker directory. */
+export function listLocalAgentSessions({ includeRevoked = true } = {}) {
+  if (!WORKER_CONFIGURED) return Promise.resolve(workerMissing());
+  return authed(`/api/local-agents?include_revoked=${includeRevoked ? 'true' : 'false'}`);
+}
+
+/** GET /api/local-agents/:agent_id — read AgentSession status. */
+export function getLocalAgentStatus(agentId = 'default') {
+  if (!WORKER_CONFIGURED) return Promise.resolve(workerMissing());
+  return authed(`/api/local-agents/${encodeURIComponent(agentId)}`);
+}
+
+/** POST /api/local-agents/:agent_id/revoke — revoke bridge control for a daemon session. */
+export function revokeLocalAgent(agentId = 'default', token) {
+  return authed(`/api/local-agents/${encodeURIComponent(agentId)}/revoke`, {
+    method: 'POST',
+    token,
+  });
+}
+
+/** GET /api/local-agents/:agent_id/activity — queue a bounded activity.tail command. */
+export function tailLocalAgentActivity(agentId = 'default', token, { limit = 25 } = {}) {
+  return authed(
+    `/api/local-agents/${encodeURIComponent(agentId)}/activity?limit=${encodeURIComponent(limit)}`,
+    { token }
+  );
+}
+
+/** POST /api/local-agents/:agent_id/commands — submit a typed remote command. */
+export function submitLocalAgentCommand(agentId = 'default', token, type, payload = {}) {
+  return authed(`/api/local-agents/${encodeURIComponent(agentId)}/commands`, {
+    method: 'POST',
+    token,
+    body: {
+      type,
+      payload,
+      idempotency_key: `ui_${type.replace(/[^a-z0-9_.:-]+/gi, '_')}_${Date.now()}`,
+    },
+  });
+}
+
+/** GET /api/local-agents/:agent_id/commands — list bounded command records. */
+export function listLocalAgentCommands(agentId = 'default', token) {
+  return authed(`/api/local-agents/${encodeURIComponent(agentId)}/commands`, { token });
+}
+
+/** GET /api/local-agents/:agent_id/commands/:command_id — poll a command result. */
+export function getLocalAgentCommand(agentId = 'default', token, commandId) {
+  return authed(
+    `/api/local-agents/${encodeURIComponent(agentId)}/commands/${encodeURIComponent(commandId)}`,
+    { token }
+  );
 }

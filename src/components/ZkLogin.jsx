@@ -30,6 +30,7 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
 
   return (
     <div
+      className="auth-shell"
       style={{
         position: 'relative',
         zIndex: 1,
@@ -40,6 +41,7 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
     >
       {/* left — brand / value */}
       <div
+        className="auth-hero"
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -66,12 +68,12 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
           <Logo size={34} />
         </a>
         <div style={{ maxWidth: 520 }}>
-          <div className="badge badge-accent" style={{ marginBottom: 22 }}>
+          <div className="badge badge-accent auth-badge" style={{ marginBottom: 22 }}>
             <span className="dot pulse"></span>Local Agent · Hyperliquid + OKX
           </div>
           <h1
             className="display"
-            style={{ fontSize: 46, fontWeight: 700, lineHeight: 1.05, letterSpacing: '-0.02em' }}
+            style={{ fontSize: 46, fontWeight: 700, lineHeight: 1.05, letterSpacing: 0 }}
           >
             The AI agent that <span style={{ color: 'var(--accent)' }}>trades for you</span> — and
             can't go rogue.
@@ -89,7 +91,7 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
             bounded actions to Hyperliquid, OKX, Solana and Ethereum. Sui Testnet remains the
             verified demo path.
           </p>
-          <div style={{ display: 'flex', gap: 26, marginTop: 36 }}>
+          <div className="auth-stats" style={{ display: 'flex', gap: 26, marginTop: 36 }}>
             {[
               { k: 'Local', v: 'secret store' },
               { k: 'Venue', v: 'trade-only guard' },
@@ -107,13 +109,17 @@ export function ZkLogin({ onAuth, onBackToLanding, workerConfigured = false }) {
             ))}
           </div>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--t3)', fontFamily: 'var(--f-mono)' }}>
+        <div
+          className="auth-footnote"
+          style={{ fontSize: 12, color: 'var(--t3)', fontFamily: 'var(--f-mono)' }}
+        >
           Local daemon · OWS vault · Hyperliquid · OKX · Worker bridge
         </div>
       </div>
 
       {/* right — auth */}
       <div
+        className="auth-panel"
         style={{
           display: 'flex',
           flexDirection: 'column',

@@ -620,6 +620,57 @@ textarea:focus {
   }
 }
 
+@media (max-width: 760px) {
+  .auth-shell {
+    grid-template-columns: 1fr !important;
+    height: 100vh !important;
+    min-width: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .auth-hero {
+    justify-content: flex-start !important;
+    gap: 30px;
+    min-width: 0;
+    padding: 34px 24px 28px !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--border);
+  }
+  .auth-panel {
+    justify-content: flex-start !important;
+    min-width: 0;
+    padding: 28px 24px 40px !important;
+  }
+  .auth-hero h1 {
+    font-size: 42px !important;
+    line-height: 1.06 !important;
+  }
+  .auth-stats {
+    flex-wrap: wrap;
+    gap: 16px !important;
+    margin-top: 28px !important;
+  }
+  .auth-footnote {
+    display: none;
+  }
+  .auth-badge {
+    max-width: 100%;
+    white-space: normal;
+    border-radius: 20px;
+  }
+}
+
+@media (max-width: 420px) {
+  .auth-hero,
+  .auth-panel {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  .auth-hero h1 {
+    font-size: 40px !important;
+  }
+}
+
 /* market monitor rows + clickable mode badge (ported from design) */
 .mkt-row:hover {
   background: var(--glass);

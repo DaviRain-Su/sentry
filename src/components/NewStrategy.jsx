@@ -8,11 +8,24 @@ import { useCurrentAccount } from '@mysten/dapp-kit';
 import { RG } from '../data.js';
 import { Icon, Sparkline, fmtUsd } from './Primitives.jsx';
 import { Slider, Button } from '@heroui/react';
-import { WORKER_CONFIGURED, parseIntent as parseWorkerIntent, getSuiPriceHistory } from '../api.js';
+import {
+  WORKER_CONFIGURED,
+  getLocalAgentCommand,
+  getSuiPriceHistory,
+  parseIntent as parseWorkerIntent,
+  submitLocalAgentCommand,
+} from '../api.js';
 import { parseIntent as parseLocalIntent } from '../../core/strategy.js';
 import { runBacktest } from '../../core/backtest.js';
 import deployment from '../../core/deployment.js';
 import { TARGET_EXECUTION_VENUES } from '../../core/venues.js';
+import {
+  buildLocalPolicyMetadata,
+  defaultLegsFor,
+  hasLocalPolicyTemplates,
+  localPolicyAuthorizationIssues,
+  localPolicyTemplateVenueIds,
+} from '../local-policy-metadata.js';
 
 function Stepper({ step, steps }) {
   return (
@@ -122,26 +135,87 @@ const VENUE_OPTS = {
   spot: TARGET_EXECUTION_VENUES,
 };
 const MARK_PX = { 'funding-arb': 104000, spot: 150 };
-
-function defaultLegsFor(scenario) {
-  if (scenario === 'spot')
-    return [
-      { venue: 'OKX', side: 'long', pct: 50 },
-      { venue: 'Raydium', side: 'short', pct: 50 },
-    ];
-  if (scenario === 'funding-arb')
-    return [
-      { venue: 'OKX', side: 'short', pct: 50 },
-      { venue: 'Hyperliquid', side: 'long', pct: 50 },
-    ];
-  return [
-    { venue: 'Bluefin', side: 'short', pct: 50 },
-    { venue: 'Hyperliquid', side: 'long', pct: 50 },
-  ];
-}
+const LOCAL_POLICY_VENUE_LABELS = {
+  'solana-mainnet': 'Solana',
+  'ethereum-mainnet': 'Ethereum',
+  hyperliquid: 'Hyperliquid',
+  okx: 'OKX',
+};
 
 function sliderNumber(value) {
   return Array.isArray(value) ? Number(value[0]) : Number(value);
+}
+
+const BRIDGE_AGENT_ID_KEY = 'sentry.localAgent.agentId';
+const BRIDGE_OWNER_TOKEN_KEY = 'sentry.localAgent.ownerControlToken';
+
+function readStored(key, fallback = '') {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    return window.localStorage.getItem(key) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function needsWalletRefs(venueIds = []) {
+  return venueIds.some((venueId) => venueId === 'solana-mainnet' || venueId === 'ethereum-mainnet');
+}
+
+async function submitAndWaitForLocalResult(agentId, ownerToken, type, payload = {}) {
+  const queued = await submitLocalAgentCommand(agentId, ownerToken, type, payload);
+  if (queued.status !== 'ok') {
+    const error = new Error(queued.message || queued.code || `${type} failed.`);
+    error.code = queued.code || `${type.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_FAILED`;
+    throw error;
+  }
+
+  const commandId = queued.command?.message_id || queued.command_record?.command_id;
+  let finalRecord = queued.command_record || null;
+  for (let attempt = 0; commandId && attempt < 8; attempt += 1) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 650));
+    const polled = await getLocalAgentCommand(agentId, ownerToken, commandId);
+    if (polled.status !== 'ok') {
+      const error = new Error(polled.message || polled.code || `${type} polling failed.`);
+      error.code = polled.code || `${type.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_POLL_FAILED`;
+      throw error;
+    }
+    finalRecord = polled.command;
+    if (finalRecord?.command_status === 'result') break;
+  }
+
+  if (finalRecord?.command_status !== 'result') {
+    const error = new Error(`${type} did not return a local daemon result before registration.`);
+    error.code = `${type.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_RESULT_REQUIRED`;
+    error.command = finalRecord;
+    throw error;
+  }
+
+  return finalRecord.result || {};
+}
+
+async function resolveLocalPolicyAuthorizationContext(agentId, ownerToken, values) {
+  const venueIds = localPolicyTemplateVenueIds(values);
+  const authorizationState = await submitAndWaitForLocalResult(
+    agentId,
+    ownerToken,
+    'authorization.state',
+    { scope: venueIds }
+  );
+  const walletRefs = needsWalletRefs(venueIds)
+    ? await submitAndWaitForLocalResult(agentId, ownerToken, 'wallet.refs', {})
+    : null;
+  return { authorizationState, walletRefs };
+}
+
+function localPolicyAuthorizationMessage(issues = []) {
+  const text = issues
+    .slice(0, 4)
+    .map(
+      (issue) => `${LOCAL_POLICY_VENUE_LABELS[issue.venue_id] || issue.venue_id}: ${issue.message}`
+    )
+    .join(' ');
+  return `Register the missing local authorizations in Profile / Wallet first. ${text}`;
 }
 
 function LegBuilder({ scenario, budget, leverage, legs, setLegs }) {
@@ -407,7 +481,7 @@ function LegBuilder({ scenario, budget, leverage, legs, setLegs }) {
   );
 }
 
-export function NewStrategy({ onDone, mode, setMode, seed }) {
+export function NewStrategy({ onDone, mode, setMode, seed, onToast }) {
   const PARSED = {
     safe: RG.parsed,
     dca: RG.parsedDCA,
@@ -443,6 +517,7 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
   const [livePreview, setLivePreview] = useState(null);
   const [livePreviewSource, setLivePreviewSource] = useState(null);
   const [liveBacktest, setLiveBacktest] = useState(null);
+  const [localDeployResult, setLocalDeployResult] = useState(null);
   const account = useCurrentAccount();
   const workerPreview = WORKER_CONFIGURED;
   const live = !!account || workerPreview;
@@ -521,8 +596,144 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
     setLivePreview(null);
     setLivePreviewSource(null);
     setLiveBacktest(null);
+    setLocalDeployResult(null);
     parseIntentMutation.mutate(values);
   };
+
+  const localPolicyDeployMutation = useMutation({
+    mutationFn: async ({ values, meta, text }) => {
+      if (!WORKER_CONFIGURED) {
+        const error = new Error('Set VITE_WORKER_URL before registering a local daemon policy.');
+        error.code = 'WORKER_NOT_CONFIGURED';
+        throw error;
+      }
+      const ownerToken = readStored(BRIDGE_OWNER_TOKEN_KEY);
+      if (!ownerToken) {
+        const error = new Error(
+          'Pair a local daemon in Profile / Wallet before registering policy.'
+        );
+        error.code = 'OWNER_CONTROL_TOKEN_REQUIRED';
+        throw error;
+      }
+      const agentId = readStored(BRIDGE_AGENT_ID_KEY, 'default');
+      const templateVenueIds = localPolicyTemplateVenueIds(values);
+      if (!templateVenueIds.length) {
+        const error = new Error(
+          'Local policy registration needs at least one Solana, Ethereum, Hyperliquid or OKX task template.'
+        );
+        error.code = 'LOCAL_POLICY_TEMPLATE_REQUIRED';
+        throw error;
+      }
+      const authorizationContext = await resolveLocalPolicyAuthorizationContext(
+        agentId,
+        ownerToken,
+        values
+      );
+      const authorizationIssues = localPolicyAuthorizationIssues(values, authorizationContext);
+      if (authorizationIssues.length) {
+        const error = new Error(localPolicyAuthorizationMessage(authorizationIssues));
+        error.code = 'LOCAL_POLICY_AUTHORIZATION_REF_REQUIRED';
+        error.issues = authorizationIssues;
+        throw error;
+      }
+      const policy = buildLocalPolicyMetadata({
+        values,
+        meta,
+        text,
+        targetAgent: readStored('sentry.localAgent.preferredAgent', 'codex'),
+        authorizationContext,
+      });
+      const queued = await submitLocalAgentCommand(agentId, ownerToken, 'policy.local.add', {
+        policy,
+      });
+      if (queued.status !== 'ok') {
+        const error = new Error(queued.message || queued.code || 'Policy registration failed.');
+        error.code = queued.code || 'POLICY_LOCAL_ADD_FAILED';
+        throw error;
+      }
+      const commandId = queued.command?.message_id || queued.command_record?.command_id;
+      let finalRecord = queued.command_record || null;
+      for (let attempt = 0; commandId && attempt < 8; attempt += 1) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 650));
+        const polled = await getLocalAgentCommand(agentId, ownerToken, commandId);
+        if (polled.status !== 'ok') {
+          const error = new Error(
+            polled.message || polled.code || 'Policy command polling failed.'
+          );
+          error.code = polled.code || 'POLICY_LOCAL_ADD_POLL_FAILED';
+          throw error;
+        }
+        finalRecord = polled.command;
+        if (finalRecord?.command_status === 'result') break;
+      }
+      if (finalRecord?.command_status !== 'result') {
+        return {
+          status: 'queued',
+          policy,
+          command: finalRecord,
+          agent_id: agentId,
+        };
+      }
+      if (finalRecord.result?.status !== 'ok') {
+        const error = new Error(
+          finalRecord.result?.message || finalRecord.result?.code || 'Policy registration blocked.'
+        );
+        error.code = finalRecord.result?.code || 'POLICY_LOCAL_ADD_BLOCKED';
+        error.result = finalRecord.result;
+        throw error;
+      }
+      return {
+        status: 'ok',
+        policy: finalRecord.result.policy || policy,
+        command: finalRecord,
+        agent_id: agentId,
+      };
+    },
+  });
+
+  async function deployLocalPolicy(values, meta, text) {
+    setLocalDeployResult(null);
+    try {
+      const result = await localPolicyDeployMutation.mutateAsync({ values, meta, text });
+      setLocalDeployResult(result);
+      onToast &&
+        onToast(
+          result.status === 'ok'
+            ? `Local policy registered: ${result.policy.policy_id}`
+            : 'Local policy command queued',
+          result.status === 'ok' ? 'var(--safe)' : 'var(--warn)'
+        );
+      if (result.status === 'ok') {
+        onDone(
+          {
+            ...meta,
+            budget: Number(values.budget),
+            slip: Number(values.slip),
+            expiry: Number(values.expiry),
+            leverage: ['funding-arb', 'hedge'].includes(values.scenario)
+              ? Number(values.leverage)
+              : null,
+            liqBuffer: ['funding-arb', 'hedge', 'lend'].includes(values.scenario)
+              ? Number(values.liqBuffer)
+              : null,
+            requireApproval: Boolean(values.requireApproval),
+            legs: ['funding-arb', 'spot'].includes(values.scenario) ? values.legs : null,
+            localDaemon: true,
+            localDaemonPolicyId: result.policy.policy_id,
+          },
+          text
+        );
+      }
+    } catch (error) {
+      const result = {
+        status: 'error',
+        code: error.code || 'POLICY_LOCAL_ADD_FAILED',
+        message: error.message || String(error),
+      };
+      setLocalDeployResult(result);
+      onToast && onToast(result.message, 'var(--warn)');
+    }
+  }
 
   return (
     <div
@@ -547,13 +758,20 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
           const parsing = parseIntentMutation.isPending;
           const P = PARSED[scenario] || RG.parsed;
           const meta = P.meta || RG.parsed.meta;
+          const localPolicyVenueIds = localPolicyTemplateVenueIds(values);
+          const localPolicyVenueLabels = localPolicyVenueIds.map(
+            (venueId) => LOCAL_POLICY_VENUE_LABELS[venueId] || venueId
+          );
           const adv = {
             leverage: ['funding-arb', 'hedge'].includes(scenario),
             twoLeg: ['funding-arb', 'spot'].includes(scenario),
             flip: scenario === 'funding-arb',
             ltv: scenario === 'lend',
           };
-          const venueScoped = ['funding-arb', 'spot'].includes(scenario);
+          const venueScoped = hasLocalPolicyTemplates(values);
+          const localRuntime = mode === 'local' && venueScoped;
+          const remoteReadOnlyPreview = mode !== 'local' && readOnlyPreview;
+          const localDeploying = localPolicyDeployMutation.isPending;
           const previewTitle = venueScoped ? 'Action preview' : 'Transaction preview';
           const previewBadge = venueScoped ? 'venue actions' : 'PTB · human-readable';
           const policyTitle = venueScoped ? 'Venue authorization guard' : 'Move Policy Object';
@@ -561,10 +779,10 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
             ? 'This guard combines local Guardian checks, trade-only venue credentials and venue-side limits. It blocks withdrawals and refuses any order outside the configured budget, market scope and expiry.'
             : "This on-chain object is the agent's leash. It can never exceed these limits, enforced by Move, not by trust. You can revoke it any time.";
           const budgetCopy = venueScoped
-            ? 'Cap applied before every venue order, with matching limits expected on OKX/Hyperliquid accounts.'
+            ? `Cap applied before every local task. Venue-side limits are still expected on ${localPolicyVenueLabels.join(', ') || 'target venues'}.`
             : 'Hard cap on total spend. The agent self-checks remaining budget before every order.';
           const scopeOptions = venueScoped
-            ? [meta.scope, 'Hyperliquid', 'OKX', 'Ethereum', 'Solana']
+            ? [meta.scope, ...localPolicyVenueLabels]
             : [meta.scope, 'SUI/USDC', 'DEEP/USDC', 'WAL/USDC'];
           const blocked = P.guardian.some((g) => g.level === 'fail');
           const failCount = P.guardian.filter((g) => g.level === 'fail').length;
@@ -1555,12 +1773,12 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                           >
                             {m.s}
                           </p>
-                          <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
                             {m.tags.map((t) => (
                               <span
                                 key={t}
                                 className="badge badge-neutral"
-                                style={{ fontSize: 10 }}
+                                style={{ maxWidth: '100%', fontSize: 10, whiteSpace: 'normal' }}
                               >
                                 {t}
                               </span>
@@ -1597,24 +1815,55 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                       </div>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 13.5 }}>
-                          {readOnlyPreview
-                            ? 'Read-only Worker preview'
-                            : requireApproval
-                              ? 'Supervised — you approve each execution'
-                              : 'One signature creates the Policy Object'}
+                          {localRuntime
+                            ? 'Register local daemon policy'
+                            : remoteReadOnlyPreview
+                              ? 'Read-only Worker preview'
+                              : requireApproval
+                                ? 'Supervised — you approve each execution'
+                                : 'One signature creates the Policy Object'}
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--t2)' }}>
-                          {readOnlyPreview
-                            ? venueScoped
-                              ? 'The parsed intent, venue action preview and Guardian output came from the live Worker. Pair the local daemon before allowing execution.'
-                              : 'The parsed intent, PTB preview and Guardian output came from the live Worker. Connect a Sui wallet only when you want to sign and deploy.'
-                            : requireApproval
-                              ? 'The agent stages orders; nothing executes without your sign-off.'
-                              : 'After this, the agent acts autonomously within limits — no more signing.'}
+                          {localRuntime
+                            ? 'The dashboard writes sanitized policy metadata to your paired daemon. It does not grant new authority or dispatch.'
+                            : remoteReadOnlyPreview
+                              ? venueScoped
+                                ? 'The parsed intent, venue action preview and Guardian output came from the live Worker. Pair the local daemon before allowing execution.'
+                                : 'The parsed intent, PTB preview and Guardian output came from the live Worker. Connect a Sui wallet only when you want to sign and deploy.'
+                              : requireApproval
+                                ? 'The agent stages orders; nothing executes without your sign-off.'
+                                : 'After this, the agent acts autonomously within limits — no more signing.'}
                         </div>
                       </div>
                     </div>
                   </div>
+
+                  {localDeployResult && (
+                    <div
+                      className="card"
+                      style={{
+                        padding: 14,
+                        borderColor:
+                          localDeployResult.status === 'ok'
+                            ? 'rgba(74,222,128,0.4)'
+                            : 'rgba(250,204,21,0.4)',
+                      }}
+                    >
+                      <span
+                        className={`badge ${
+                          localDeployResult.status === 'ok' ? 'badge-safe' : 'badge-warn'
+                        }`}
+                        style={{ fontSize: 10 }}
+                      >
+                        {localDeployResult.status === 'ok'
+                          ? 'local policy registered'
+                          : localDeployResult.code || localDeployResult.status}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--t1)', marginLeft: 10 }}>
+                        {localDeployResult.policy?.policy_id || localDeployResult.message}
+                      </span>
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Button
@@ -1626,7 +1875,12 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                     </Button>
                     <Button
                       className="bg-accent text-accent-foreground font-semibold"
-                      onPress={() =>
+                      isDisabled={localDeploying}
+                      onPress={() => {
+                        if (localRuntime) {
+                          deployLocalPolicy(values, meta, text);
+                          return;
+                        }
                         onDone(
                           {
                             ...meta,
@@ -1639,11 +1893,17 @@ export function NewStrategy({ onDone, mode, setMode, seed }) {
                             legs: adv.twoLeg ? legs : null,
                           },
                           text
-                        )
-                      }
+                        );
+                      }}
                     >
                       <Icon name="shield" size={15} />{' '}
-                      {readOnlyPreview ? 'Preview only · connect wallet' : 'Sign & deploy policy'}
+                      {localRuntime
+                        ? localDeploying
+                          ? 'Registering local policy...'
+                          : 'Register local policy'
+                        : remoteReadOnlyPreview
+                          ? 'Preview only · connect wallet'
+                          : 'Sign & deploy policy'}
                     </Button>
                   </div>
                 </div>

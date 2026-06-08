@@ -107,9 +107,15 @@ function mixHex(hex, toward, t) {
 
 function NavItem({ icon, label, active, onClick, badge, badgeClass = 'badge-accent' }) {
   return (
-    <button onClick={onClick} className={`rg-navitem${active ? ' is-active' : ''}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rg-navitem${active ? ' is-active' : ''}`}
+      aria-label={label}
+      title={label}
+    >
       <span className="rg-navlamp" aria-hidden="true" />
-      <span className="rg-navicon">
+      <span className="rg-navicon" aria-hidden="true">
         <Icon name={icon} size={18} />
       </span>
       <span className="rg-navlabel" style={{ flex: 1 }}>
@@ -569,7 +575,7 @@ export default function App({ onExit }) {
   });
 
   const handleRevoke = async (id) => {
-    if (liveMode) {
+    if (!meta.localDaemon && liveMode) {
       if (!WORKER_CONFIGURED) {
         showToast('Revoke needs the Worker — set VITE_WORKER_URL and run it', 'var(--warn)');
         return;
@@ -577,7 +583,7 @@ export default function App({ onExit }) {
       revokeLiveMutation.mutate({ id });
       return;
     }
-    if (readOnlyLiveMode) {
+    if (!meta.localDaemon && readOnlyLiveMode) {
       showToast('Read-only live Worker mode — connect a wallet to revoke on-chain', 'var(--warn)');
       return;
     }
@@ -706,10 +712,11 @@ export default function App({ onExit }) {
     }
     const np = {
       id:
+        meta.localDaemonPolicyId ||
         '0x' +
-        Math.random().toString(16).slice(2, 6) +
-        '…' +
-        Math.random().toString(16).slice(2, 6),
+          Math.random().toString(16).slice(2, 6) +
+          '…' +
+          Math.random().toString(16).slice(2, 6),
       name: meta.name,
       strategy: meta.strategy,
       status: 'active',
@@ -732,21 +739,32 @@ export default function App({ onExit }) {
         date: 'Today',
         kind: 'policy',
         policy: np.name,
-        title: 'Policy Object created',
-        detail: `Budget ${meta.budget} USDC · scope ${meta.scope} · ${mode} mode · expires Jun 14`,
+        title: meta.localDaemon ? 'Local policy registered' : 'Policy Object created',
+        detail: `Budget ${meta.budget} USDC · scope ${meta.scope} · ${
+          meta.localDaemon ? 'daemon metadata' : mode + ' mode'
+        } · expires Jun 14`,
         amount: 0,
         tx:
+          meta.localDaemonPolicyId ||
           '0x' +
-          Math.random().toString(16).slice(2, 6) +
-          '…' +
-          Math.random().toString(16).slice(2, 6),
+            Math.random().toString(16).slice(2, 6) +
+            '…' +
+            Math.random().toString(16).slice(2, 6),
         risk: null,
         mode,
       },
       ...a,
     ]);
-    showToast('Policy deployed — agent is now autonomous within limits', 'var(--accent)');
-    pushNotif('policy', `Policy deployed · ${meta.name}`);
+    showToast(
+      meta.localDaemon
+        ? 'Local policy registered — run Preflight before dispatch'
+        : 'Policy deployed — agent is now autonomous within limits',
+      'var(--accent)'
+    );
+    pushNotif(
+      'policy',
+      `${meta.localDaemon ? 'Local policy registered' : 'Policy deployed'} · ${meta.name}`
+    );
     setView('policies');
   };
 
@@ -895,6 +913,8 @@ export default function App({ onExit }) {
             <Button
               className="mt-[18px] bg-accent text-accent-foreground font-semibold"
               fullWidth
+              aria-label="New strategy"
+              title="New strategy"
               onPress={() => {
                 setSeed(null);
                 setView('new');
@@ -1476,7 +1496,13 @@ export default function App({ onExit }) {
               />
             )}
             {view === 'new' && (
-              <NewStrategy mode={mode} setMode={setMode} onDone={deployPolicy} seed={seed} />
+              <NewStrategy
+                mode={mode}
+                setMode={setMode}
+                onDone={deployPolicy}
+                seed={seed}
+                onToast={showToast}
+              />
             )}
             {view === 'activity' && (
               <ActivityView
