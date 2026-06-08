@@ -93,7 +93,49 @@ const fetched = await fetchEthereumTransactionReceipt({
   },
 });
 assert.equal(fetched.status, 'ok');
+assert.equal(fetched.retry.attempts, 1);
 assert.deepEqual(capturedBody, request.body);
+
+let retryCalls = 0;
+const retrySleeps = [];
+const retryFetched = await fetchEthereumTransactionReceipt({
+  task: built.task,
+  result,
+  now: new Date(timestamp),
+  env: { SENTRY_ETHEREUM_RPC_URL: 'https://ethereum.invalid' },
+  rateLimitPolicy: { max_attempts: 2, base_backoff_ms: 8, max_backoff_ms: 8 },
+  sleepImpl: async (ms) => retrySleeps.push(ms),
+  fetchImpl: async () => {
+    retryCalls += 1;
+    if (retryCalls === 1) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { error: { code: -32603, message: 'upstream unavailable' } };
+        },
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          result: {
+            transactionHash: txHash,
+            blockHash: '0x2222222222222222222222222222222222222222222222222222222222222222',
+            blockNumber: '0x124',
+            status: '0x1',
+            gasUsed: '0x5208',
+          },
+        };
+      },
+    };
+  },
+});
+assert.equal(retryFetched.status, 'ok');
+assert.equal(retryFetched.retry.retry_count, 1);
+assert.deepEqual(retrySleeps, [8]);
 
 const notFound = normalizeEthereumTransactionReceiptResponse(
   {
@@ -134,6 +176,7 @@ const rpcError = await fetchEthereumTransactionReceipt({
   task: built.task,
   result,
   env: { SENTRY_ETHEREUM_RPC_URL: 'https://ethereum.invalid' },
+  rateLimitPolicy: { max_attempts: 1 },
   fetchImpl: async () => ({
     ok: true,
     status: 200,
@@ -144,5 +187,6 @@ const rpcError = await fetchEthereumTransactionReceipt({
 });
 assert.equal(rpcError.status, 'error');
 assert.equal(rpcError.code, 'ETHEREUM_RPC_ERROR');
+assert.equal(rpcError.retry.retry_exhausted, true);
 
 console.log('ALL ETHEREUM RECEIPT ADAPTER TESTS PASS');

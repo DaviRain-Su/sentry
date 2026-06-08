@@ -24,6 +24,7 @@ import {
   authErrorResponse,
   checkToken,
   randomToken,
+  relayProtocolFromRequest,
   sha256Hex,
   tokenFromRequest,
 } from './daemon-auth.js';
@@ -46,13 +47,40 @@ import type { ParseDefaults, Strategy } from './types.js';
 import { getAuthorizationRegistrySnapshot } from '../../core/authorization.js';
 import { getVenueCatalogSnapshot } from '../../core/venues.js';
 import {
+  applyCommandAck,
+  applyCommandResumeRequested,
+  applyCommandSent,
   applyCommandResult,
   commandIdFromPath,
   commandRecordFromMessage,
   type AgentCommandRecord,
   rememberCommandRecord,
 } from './agent-session-command-records.js';
-import { isAllowedLocalAgentCommand } from './local-agent-commands.js';
+import {
+  LOCAL_AGENT_DIRECTORY_NAME,
+  markDirectoryEntryRevoked,
+  type LocalAgentDirectoryEntry,
+  upsertDirectoryEntry,
+} from './agent-session-directory.js';
+import {
+  isAllowedLocalAgentCommand,
+  isReplayableLocalAgentCommand,
+} from './local-agent-commands.js';
+import {
+  validateBridgeEnvelopeSequence,
+  validateBridgeEnvelopeTiming,
+  verifyBridgeEnvelope,
+} from '../../core/bridge-envelope.js';
+import {
+  verifyDaemonBridgeIdentityEnvelope,
+  verifyDaemonPairingProof,
+  verifyDaemonRelayRefreshProof,
+} from './daemon-identity.js';
+import {
+  loadOrCreateWorkerBridgeIdentity,
+  signWorkerBridgeEnvelope,
+  type WorkerBridgeIdentity,
+} from './worker-bridge-identity.js';
 
 export interface Env {
   AGENT_RUNTIME: DurableObjectNamespace;
@@ -72,7 +100,10 @@ const app = new Hono<{ Bindings: Env }>();
 const PARSE_CACHE_MAX_ENTRIES = 200;
 const PAIRING_CODE_TTL_MS = 5 * 60 * 1000;
 const RELAY_TOKEN_TTL_MS = 30 * 60 * 1000;
+const RELAY_TOKEN_REFRESH_CHALLENGE_TTL_MS = 60 * 1000;
 const OWNER_CONTROL_TOKEN_TTL_MS = 30 * 60 * 1000;
+const MAX_PENDING_REPLAY_COMMANDS = 25;
+const COMMAND_ACK_TIMEOUT_MS = 15 * 1000;
 const parseCache = new Map<string, Record<string, unknown>>();
 function setParseCache(key: string, value: Record<string, unknown>) {
   if (parseCache.size >= PARSE_CACHE_MAX_ENTRIES) {
@@ -421,6 +452,40 @@ app.get('/api/activity', async (c) => {
 });
 
 // ── Local Agent bridge: daemon status, WebSocket and command relay ─────────
+app.get('/api/local-agents', async (c) => {
+  const includeRevoked = c.req.query('include_revoked') !== 'false';
+  const directoryStub = c.env.AGENT_SESSIONS.get(
+    c.env.AGENT_SESSIONS.idFromName(LOCAL_AGENT_DIRECTORY_NAME)
+  );
+  const directoryRes = await directoryStub.fetch('https://agent-session/directory/list');
+  const directoryBody = await directoryRes.json<Record<string, any>>();
+  if (!directoryRes.ok) return c.json(directoryBody, directoryRes.status as 500);
+
+  const entries = Array.isArray(directoryBody.agents)
+    ? (directoryBody.agents as LocalAgentDirectoryEntry[])
+    : [];
+  const visibleEntries = includeRevoked ? entries : entries.filter((entry) => !entry.revoked_at);
+  const agents = await Promise.all(
+    visibleEntries.map(async (entry) => {
+      const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(entry.agent_id));
+      const res = await stub.fetch(
+        `https://agent-session/${encodeURIComponent(entry.agent_id)}/state`
+      );
+      const state = await res.json<Record<string, any>>();
+      return {
+        ...entry,
+        ...(state.status === 'ok' ? state : { state_error: state }),
+        directory_revoked_at: entry.revoked_at,
+      };
+    })
+  );
+  return c.json({
+    status: 'ok',
+    agent_count: agents.length,
+    agents,
+  });
+});
+
 app.post('/api/local-agents/pairing', async (c) => {
   let body: { owner?: string; device_label?: string } = {};
   try {
@@ -461,6 +526,12 @@ app.post('/api/local-agents/pair', async (c) => {
     agent_id?: string;
     device_name?: string;
     supported_capabilities?: string[];
+    agent_public_key?: string;
+    agent_public_key_alg?: string;
+    agent_public_key_encoding?: string;
+    agent_public_key_id?: string;
+    pairing_proof_issued_at?: string;
+    signed_nonce?: string;
   };
   try {
     body = await c.req.json();
@@ -470,6 +541,31 @@ app.post('/api/local-agents/pair', async (c) => {
   const pairingCode = body.pairing_code?.trim();
   if (!pairingCode) {
     return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'pairing_code required.' }, 400);
+  }
+  const agentId = body.agent_id?.trim();
+  if (!agentId) {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'agent_id required.' }, 400);
+  }
+  const deviceName = body.device_name || 'local-daemon';
+  const supportedCapabilities = Array.isArray(body.supported_capabilities)
+    ? body.supported_capabilities
+    : [];
+  const proofCheck = await verifyDaemonPairingProof({
+    ...body,
+    pairing_code: pairingCode,
+    agent_id: agentId,
+    device_name: deviceName,
+    supported_capabilities: supportedCapabilities,
+  });
+  if (!proofCheck.ok) {
+    return c.json(
+      {
+        status: 'error',
+        code: proofCheck.code,
+        message: proofCheck.message,
+      },
+      401
+    );
   }
   const pairingStub = c.env.AGENT_SESSIONS.get(
     c.env.AGENT_SESSIONS.idFromName(`pairing:${pairingCode}`)
@@ -481,26 +577,45 @@ app.post('/api/local-agents/pair', async (c) => {
   const consumedBody = await consumed.json<Record<string, any>>();
   if (!consumed.ok) return c.json(consumedBody, consumed.status as 400);
 
-  const agentId = body.agent_id?.trim() || randomToken('agent');
   const relayToken = randomToken('rt');
   const relayTokenExpiresAtMs = Date.now() + RELAY_TOKEN_TTL_MS;
+  const pairedAt = new Date().toISOString();
   const sessionStub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
   const paired = await sessionStub.fetch('https://agent-session/pair', {
     method: 'POST',
     body: JSON.stringify({
       agent_id: agentId,
       owner: consumedBody.owner,
-      device_name: body.device_name || consumedBody.device_label || 'local-daemon',
-      supported_capabilities: Array.isArray(body.supported_capabilities)
-        ? body.supported_capabilities
-        : [],
+      device_name: deviceName || consumedBody.device_label || 'local-daemon',
+      supported_capabilities: supportedCapabilities,
+      agent_public_key: proofCheck.agent_public_key,
+      agent_public_key_alg: proofCheck.agent_public_key_alg,
+      agent_public_key_encoding: proofCheck.agent_public_key_encoding,
+      agent_public_key_id: proofCheck.agent_public_key_id,
+      pairing_proof_issued_at: proofCheck.pairing_proof_issued_at,
+      pairing_proof_verified_at: pairedAt,
       relay_token_hash: await sha256Hex(relayToken),
       relay_token_expires_at_ms: relayTokenExpiresAtMs,
       owner_control_token_hash: consumedBody.owner_control_token_hash,
       owner_control_token_expires_at_ms: consumedBody.owner_control_token_expires_at_ms,
+      paired_at: pairedAt,
     }),
   });
   if (!paired.ok) return c.json(await paired.json(), paired.status as 500);
+  const directoryStub = c.env.AGENT_SESSIONS.get(
+    c.env.AGENT_SESSIONS.idFromName(LOCAL_AGENT_DIRECTORY_NAME)
+  );
+  await directoryStub.fetch('https://agent-session/directory/register', {
+    method: 'POST',
+    body: JSON.stringify({
+      agent_id: agentId,
+      owner: consumedBody.owner,
+      device_name: deviceName || consumedBody.device_label || 'local-daemon',
+      agent_public_key_id: proofCheck.agent_public_key_id,
+      paired_at: pairedAt,
+      updated_at: pairedAt,
+    }),
+  });
   return c.json({
     status: 'ok',
     agent_id: agentId,
@@ -527,6 +642,68 @@ app.get('/api/local-agents/:agent_id/connect', async (c) => {
   const agentId = c.req.param('agent_id');
   const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
   return stub.fetch(c.req.raw);
+});
+
+app.post('/api/local-agents/:agent_id/relay-token/challenge', async (c) => {
+  const agentId = c.req.param('agent_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(
+    `https://agent-session/${encodeURIComponent(agentId)}/relay-token/challenge`,
+    { method: 'POST' }
+  );
+  return c.json(await res.json(), res.status as 200);
+});
+
+app.post('/api/local-agents/:agent_id/relay-token/refresh', async (c) => {
+  let body: Record<string, any> = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ status: 'error', code: 'BAD_REQUEST', message: 'Invalid JSON body.' }, 400);
+  }
+  const agentId = c.req.param('agent_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(
+    `https://agent-session/${encodeURIComponent(agentId)}/relay-token/refresh`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  );
+  return c.json(await res.json(), res.status as 200);
+});
+
+app.post('/api/local-agents/:agent_id/revoke', async (c) => {
+  const agentId = c.req.param('agent_id');
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(`https://agent-session/${encodeURIComponent(agentId)}/revoke`, {
+    method: 'POST',
+    headers: { Authorization: c.req.header('Authorization') || '' },
+  });
+  const body = await res.json<Record<string, any>>();
+  if (res.ok && body.revoked_at) {
+    const directoryStub = c.env.AGENT_SESSIONS.get(
+      c.env.AGENT_SESSIONS.idFromName(LOCAL_AGENT_DIRECTORY_NAME)
+    );
+    await directoryStub.fetch('https://agent-session/directory/revoke', {
+      method: 'POST',
+      body: JSON.stringify({ agent_id: agentId, revoked_at: body.revoked_at }),
+    });
+  }
+  return c.json(body, res.status as 200);
+});
+
+app.get('/api/local-agents/:agent_id/activity', async (c) => {
+  const agentId = c.req.param('agent_id');
+  const limit = c.req.query('limit') || '50';
+  const stub = c.env.AGENT_SESSIONS.get(c.env.AGENT_SESSIONS.idFromName(agentId));
+  const res = await stub.fetch(
+    `https://agent-session/${encodeURIComponent(agentId)}/activity?limit=${encodeURIComponent(limit)}`,
+    {
+      headers: { Authorization: c.req.header('Authorization') || '' },
+    }
+  );
+  return c.json(await res.json(), res.status as 200);
 });
 
 app.get('/api/local-agents/:agent_id/commands', async (c) => {
@@ -931,7 +1108,16 @@ type AgentSessionMessage = {
   message_id?: string;
   idempotency_key?: string;
   issued_at?: string;
+  seq?: number;
+  signature?: string;
   payload?: Record<string, any>;
+};
+
+type PendingReplayCommand = {
+  command: Record<string, any>;
+  queued_at: string;
+  replay_count: number;
+  last_replayed_at?: string;
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -962,6 +1148,17 @@ export class AgentSession {
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const commandId = commandIdFromPath(url.pathname);
+    if (url.pathname === '/directory/list' && req.method === 'GET') {
+      return this.listDirectory();
+    }
+    if (url.pathname === '/directory/register' && req.method === 'POST') {
+      const body = await req.json<Record<string, any>>();
+      return this.registerDirectoryEntry(body);
+    }
+    if (url.pathname === '/directory/revoke' && req.method === 'POST') {
+      const body = await req.json<Record<string, any>>();
+      return this.revokeDirectoryEntry(body);
+    }
     if (url.pathname === '/pairing/init' && req.method === 'POST') {
       const body = await req.json<Record<string, any>>();
       return this.initPairing(body);
@@ -975,6 +1172,19 @@ export class AgentSession {
       return this.pairAgent(body);
     }
     if (url.pathname.endsWith('/state')) return this.status();
+    if (url.pathname.endsWith('/relay-token/challenge') && req.method === 'POST') {
+      return this.createRelayTokenChallenge();
+    }
+    if (url.pathname.endsWith('/relay-token/refresh') && req.method === 'POST') {
+      const body = await req.json<Record<string, any>>();
+      return this.refreshRelayToken(body);
+    }
+    if (url.pathname.endsWith('/revoke') && req.method === 'POST') {
+      return this.revokeAgent(req);
+    }
+    if (url.pathname.endsWith('/activity') && req.method === 'GET') {
+      return this.enqueueActivityTail(req);
+    }
     if (commandId && req.method === 'GET') {
       return this.getCommand(req, commandId);
     }
@@ -991,19 +1201,77 @@ export class AgentSession {
     return jsonResponse({ status: 'error', code: 'NOT_FOUND' }, 404);
   }
 
+  async readDirectoryEntries(): Promise<LocalAgentDirectoryEntry[]> {
+    const entries =
+      (await this.state.storage.get<LocalAgentDirectoryEntry[]>('directoryEntries')) ?? [];
+    return Array.isArray(entries) ? entries : [];
+  }
+
+  async writeDirectoryEntries(entries: LocalAgentDirectoryEntry[]): Promise<void> {
+    await this.state.storage.put('directoryEntries', entries);
+  }
+
+  async ensureWorkerBridgeIdentity(): Promise<WorkerBridgeIdentity> {
+    return loadOrCreateWorkerBridgeIdentity(this.state.storage);
+  }
+
+  async listDirectory(): Promise<Response> {
+    const agents = await this.readDirectoryEntries();
+    return jsonResponse({
+      status: 'ok',
+      agent_count: agents.length,
+      agents,
+    });
+  }
+
+  async registerDirectoryEntry(body: Record<string, any>): Promise<Response> {
+    let entries: LocalAgentDirectoryEntry[];
+    try {
+      entries = upsertDirectoryEntry(await this.readDirectoryEntries(), body);
+    } catch (e) {
+      return jsonResponse(
+        { status: 'error', code: 'BAD_REQUEST', message: String((e as Error).message) },
+        400
+      );
+    }
+    await this.writeDirectoryEntries(entries);
+    return jsonResponse({ status: 'ok', agent_count: entries.length, agent: entries[0] });
+  }
+
+  async revokeDirectoryEntry(body: Record<string, any>): Promise<Response> {
+    const agentId = String(body.agent_id || '');
+    const revokedAt = String(body.revoked_at || nowIso());
+    if (!agentId) {
+      return jsonResponse(
+        { status: 'error', code: 'BAD_REQUEST', message: 'agent_id required.' },
+        400
+      );
+    }
+    const entries = markDirectoryEntryRevoked(
+      await this.readDirectoryEntries(),
+      agentId,
+      revokedAt
+    );
+    await this.writeDirectoryEntries(entries);
+    return jsonResponse({ status: 'ok', agent_id: agentId, revoked_at: revokedAt });
+  }
+
   async status(): Promise<Response> {
     const lastHeartbeatMs = (await this.state.storage.get<number>('lastHeartbeatMs')) ?? null;
     const relayTokenExpiresAtMs =
       (await this.state.storage.get<number>('relayTokenExpiresAtMs')) ?? null;
+    const revokedAt = (await this.state.storage.get<string>('revokedAt')) ?? null;
     const connected = Boolean(this.socket);
     const ageMs = lastHeartbeatMs ? Date.now() - lastHeartbeatMs : null;
-    const sessionStatus = connected
-      ? ageMs !== null && ageMs > 90_000
-        ? 'stale'
-        : 'online'
-      : lastHeartbeatMs
-        ? 'offline'
-        : 'never_connected';
+    const sessionStatus = revokedAt
+      ? 'revoked'
+      : connected
+        ? ageMs !== null && ageMs > 90_000
+          ? 'stale'
+          : 'online'
+        : lastHeartbeatMs
+          ? 'offline'
+          : 'never_connected';
     return jsonResponse({
       status: 'ok',
       agent_id: (await this.state.storage.get<string>('agentId')) ?? null,
@@ -1015,11 +1283,24 @@ export class AgentSession {
       active_process: (await this.state.storage.get('activeProcess')) ?? null,
       owner: (await this.state.storage.get('owner')) ?? null,
       device_name: (await this.state.storage.get('deviceName')) ?? null,
+      supported_capabilities: (await this.state.storage.get('supportedCapabilities')) ?? [],
+      agent_public_key: (await this.state.storage.get('agentPublicKey')) ?? null,
+      agent_public_key_alg: (await this.state.storage.get('agentPublicKeyAlg')) ?? null,
+      agent_public_key_encoding: (await this.state.storage.get('agentPublicKeyEncoding')) ?? null,
+      agent_public_key_id: (await this.state.storage.get('agentPublicKeyId')) ?? null,
+      worker_public_key_id:
+        ((await this.state.storage.get<Record<string, unknown>>('workerBridgeIdentity')) ?? null)
+          ?.key_id ?? null,
+      pairing_proof_issued_at: (await this.state.storage.get('pairingProofIssuedAt')) ?? null,
+      pairing_proof_verified_at: (await this.state.storage.get('pairingProofVerifiedAt')) ?? null,
       paired_at: (await this.state.storage.get('pairedAt')) ?? null,
+      revoked_at: revokedAt,
       relay_token_expires_at: relayTokenExpiresAtMs
         ? new Date(relayTokenExpiresAtMs).toISOString()
         : null,
+      relay_token_refreshed_at: (await this.state.storage.get('relayTokenRefreshedAt')) ?? null,
       command_count: (await this.state.storage.get<number>('commandCount')) ?? 0,
+      pending_replay_command_count: (await this.readPendingReplayCommands()).length,
       last_command: (await this.state.storage.get('lastCommand')) ?? null,
       last_result: (await this.state.storage.get('lastResult')) ?? null,
       last_message: (await this.state.storage.get('lastMessage')) ?? null,
@@ -1044,6 +1325,191 @@ export class AgentSession {
     await this.state.storage.put('commandRecords', records);
   }
 
+  async readPendingReplayCommands(): Promise<PendingReplayCommand[]> {
+    const commands =
+      (await this.state.storage.get<PendingReplayCommand[]>('pendingReplayCommands')) ?? [];
+    return Array.isArray(commands) ? commands : [];
+  }
+
+  async writePendingReplayCommands(commands: PendingReplayCommand[]): Promise<void> {
+    await this.state.storage.put(
+      'pendingReplayCommands',
+      commands.slice(0, MAX_PENDING_REPLAY_COMMANDS)
+    );
+  }
+
+  async queueReplayableCommand(command: Record<string, any>): Promise<void> {
+    const pending = await this.readPendingReplayCommands();
+    const commandId = String(command.message_id || '');
+    const idempotencyKey = String(command.idempotency_key || '');
+    const next = [
+      ...pending.filter(
+        (item) =>
+          String(item.command?.message_id || '') !== commandId &&
+          String(item.command?.idempotency_key || '') !== idempotencyKey
+      ),
+      {
+        command,
+        queued_at: nowIso(),
+        replay_count: 0,
+      },
+    ];
+    await this.writePendingReplayCommands(next);
+  }
+
+  async dropPendingReplayCommand(commandId = '', idempotencyKey = ''): Promise<void> {
+    const pending = await this.readPendingReplayCommands();
+    const next = pending.filter((item) => {
+      const itemCommandId = String(item.command?.message_id || '');
+      const itemIdempotencyKey = String(item.command?.idempotency_key || '');
+      return !(
+        (commandId && itemCommandId === commandId) ||
+        (idempotencyKey && itemIdempotencyKey === idempotencyKey)
+      );
+    });
+    if (next.length !== pending.length) await this.writePendingReplayCommands(next);
+  }
+
+  async expirePendingReplayCommands(nowMs = Date.now()): Promise<PendingReplayCommand[]> {
+    const pending = await this.readPendingReplayCommands();
+    const active: PendingReplayCommand[] = [];
+    const expired: PendingReplayCommand[] = [];
+    for (const item of pending) {
+      const expiresAtMs = Date.parse(String(item.command?.expires_at || ''));
+      if (Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs) expired.push(item);
+      else active.push(item);
+    }
+    if (expired.length) {
+      const expiredAt = new Date(nowMs).toISOString();
+      let records = await this.readCommandRecords();
+      for (const item of expired) {
+        records = applyCommandResult(
+          records,
+          {
+            message_id: randomId('result'),
+            idempotency_key: String(item.command?.idempotency_key || ''),
+            payload: {
+              command_message_id: item.command?.message_id ?? null,
+              status: 'error',
+              code: 'COMMAND_EXPIRED',
+              message: 'Remote command expired before the daemon could process it.',
+            },
+          },
+          expiredAt
+        );
+      }
+      await this.writeCommandRecords(records);
+      await this.writePendingReplayCommands(active);
+    }
+    return active;
+  }
+
+  async expireQueuedCommandRecords(nowMs = Date.now()): Promise<void> {
+    const records = await this.readCommandRecords();
+    let next = records;
+    const expiredAt = new Date(nowMs).toISOString();
+    for (const record of records) {
+      if (record.command_status === 'result') continue;
+      const ackDeadlineMs = Date.parse(String(record.ack_deadline_at || ''));
+      if (
+        record.command_status === 'queued' &&
+        Number.isFinite(ackDeadlineMs) &&
+        ackDeadlineMs <= nowMs
+      ) {
+        next = applyCommandResult(
+          next,
+          {
+            message_id: randomId('result'),
+            idempotency_key: record.idempotency_key,
+            payload: {
+              command_message_id: record.command_id,
+              status: 'error',
+              code: 'COMMAND_ACK_TIMEOUT',
+              message: 'Remote command was sent but the daemon did not acknowledge it in time.',
+            },
+          },
+          expiredAt
+        );
+        await this.dropPendingReplayCommand(record.command_id, record.idempotency_key);
+        continue;
+      }
+      const expiresAtMs = Date.parse(String(record.expires_at || ''));
+      if (!Number.isFinite(expiresAtMs) || expiresAtMs > nowMs) continue;
+      next = applyCommandResult(
+        next,
+        {
+          message_id: randomId('result'),
+          idempotency_key: record.idempotency_key,
+          payload: {
+            command_message_id: record.command_id,
+            status: 'error',
+            code: 'COMMAND_EXPIRED',
+            message: 'Remote command expired before the daemon returned a result.',
+          },
+        },
+        expiredAt
+      );
+      await this.dropPendingReplayCommand(record.command_id, record.idempotency_key);
+    }
+    if (next !== records) await this.writeCommandRecords(next);
+  }
+
+  async replayPendingCommands(): Promise<void> {
+    if (!this.socket) return;
+    const pending = await this.expirePendingReplayCommands();
+    if (!pending.length) return;
+    const next: PendingReplayCommand[] = [];
+    for (const item of pending) {
+      if (!this.socket) {
+        next.push(item);
+        continue;
+      }
+      const sent = await this.send(item.command);
+      if (sent) await this.rememberCommandSent(item.command);
+      next.push({
+        ...item,
+        replay_count: Number(item.replay_count || 0) + (sent ? 1 : 0),
+        last_replayed_at: sent ? nowIso() : item.last_replayed_at,
+      });
+    }
+    await this.writePendingReplayCommands(next);
+  }
+
+  async resumeAcknowledgedCommands(): Promise<void> {
+    if (!this.socket) return;
+    await this.expireQueuedCommandRecords();
+    const records = await this.readCommandRecords();
+    const acknowledged = records.filter((record) => record.command_status === 'acknowledged');
+    if (!acknowledged.length) return;
+    let next = records;
+    for (const record of acknowledged) {
+      if (!this.socket) break;
+      const issuedAt = nowIso();
+      const resumeCommand = {
+        kind: 'command',
+        message_id: randomId('cmd_resume'),
+        issued_at: issuedAt,
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+        idempotency_key: `resume:${record.command_id}:${crypto.randomUUID()}`,
+        payload: {
+          type: 'command.resume',
+          command_message_id: record.command_id,
+          idempotency_key: record.idempotency_key,
+          original_type: record.type,
+        },
+      };
+      const sent = await this.send(resumeCommand);
+      if (sent) {
+        next = applyCommandResumeRequested(next, record, resumeCommand, issuedAt);
+      }
+    }
+    if (next !== records) {
+      await this.writeCommandRecords(next);
+      const updated = next.find((item) => item.command_status === 'acknowledged');
+      if (updated) await this.state.storage.put('lastCommand', updated);
+    }
+  }
+
   async rememberCommand(command: Record<string, any>): Promise<AgentCommandRecord> {
     const records = await this.readCommandRecords();
     const next = rememberCommandRecord(records, command);
@@ -1051,6 +1517,38 @@ export class AgentSession {
     await this.writeCommandRecords(next);
     await this.state.storage.put('lastCommand', record);
     return record;
+  }
+
+  async rememberCommandSent(command: Record<string, any>): Promise<void> {
+    const records = await this.readCommandRecords();
+    const next = applyCommandSent(records, command, nowIso(), COMMAND_ACK_TIMEOUT_MS);
+    const changed = next.some((item, index) => item !== records[index]);
+    if (!changed) return;
+    await this.writeCommandRecords(next);
+    const commandId = String(command.message_id || '');
+    const idempotencyKey = String(command.idempotency_key || '');
+    const updated = next.find(
+      (item) =>
+        (commandId && item.command_id === commandId) ||
+        (idempotencyKey && item.idempotency_key === idempotencyKey)
+    );
+    if (updated) await this.state.storage.put('lastCommand', updated);
+  }
+
+  async rememberCommandAck(msg: AgentSessionMessage): Promise<void> {
+    const records = await this.readCommandRecords();
+    const next = applyCommandAck(records, msg, nowIso());
+    const changed = next.some((item, index) => item !== records[index]);
+    if (!changed) return;
+    await this.writeCommandRecords(next);
+    const commandId = String(msg.payload?.command_message_id || '');
+    const idempotencyKey = String(msg.idempotency_key || '');
+    const updated = next.find(
+      (item) =>
+        (commandId && item.command_id === commandId) ||
+        (idempotencyKey && item.idempotency_key === idempotencyKey)
+    );
+    if (updated) await this.state.storage.put('lastCommand', updated);
   }
 
   async rememberCommandResult(msg: AgentSessionMessage): Promise<void> {
@@ -1067,11 +1565,14 @@ export class AgentSession {
         (idempotencyKey && item.idempotency_key === idempotencyKey)
     );
     if (updated) await this.state.storage.put('lastCommand', updated);
+    await this.dropPendingReplayCommand(commandId, idempotencyKey);
   }
 
   async listCommands(req: Request): Promise<Response> {
     const authError = await this.assertOwner(req);
     if (authError) return authError;
+    await this.expirePendingReplayCommands();
+    await this.expireQueuedCommandRecords();
     const records = await this.readCommandRecords();
     return jsonResponse({
       status: 'ok',
@@ -1083,6 +1584,8 @@ export class AgentSession {
   async getCommand(req: Request, commandId: string): Promise<Response> {
     const authError = await this.assertOwner(req);
     if (authError) return authError;
+    await this.expirePendingReplayCommands();
+    await this.expireQueuedCommandRecords();
     const records = await this.readCommandRecords();
     const command =
       records.find((item) => item.command_id === commandId || item.idempotency_key === commandId) ??
@@ -1168,15 +1671,170 @@ export class AgentSession {
       'supportedCapabilities',
       Array.isArray(body.supported_capabilities) ? body.supported_capabilities : []
     );
+    await this.state.storage.put('agentPublicKey', String(body.agent_public_key || ''));
+    await this.state.storage.put('agentPublicKeyAlg', String(body.agent_public_key_alg || ''));
+    await this.state.storage.put(
+      'agentPublicKeyEncoding',
+      String(body.agent_public_key_encoding || '')
+    );
+    await this.state.storage.put('agentPublicKeyId', String(body.agent_public_key_id || ''));
+    await this.state.storage.put(
+      'pairingProofIssuedAt',
+      String(body.pairing_proof_issued_at || '')
+    );
+    await this.state.storage.put(
+      'pairingProofVerifiedAt',
+      String(body.pairing_proof_verified_at || nowIso())
+    );
     await this.state.storage.put('relayTokenHash', relayTokenHash);
     await this.state.storage.put('relayTokenExpiresAtMs', relayTokenExpiresAtMs);
     await this.state.storage.put('ownerControlTokenHash', ownerControlTokenHash);
     await this.state.storage.put('ownerControlTokenExpiresAtMs', ownerControlTokenExpiresAtMs);
-    await this.state.storage.put('pairedAt', nowIso());
+    await this.state.storage.put('pairedAt', String(body.paired_at || nowIso()));
+    await this.state.storage.put('workerBridgeSeq', 0);
+    await this.state.storage.put('daemonBridgeSeq', 0);
+    await this.state.storage.delete('revokedAt');
+    await this.state.storage.delete('revokedReason');
     return jsonResponse({ status: 'ok', agent_id: agentId });
   }
 
+  async readRelayTokenChallenges(): Promise<Record<string, any>[]> {
+    const challenges =
+      (await this.state.storage.get<Record<string, any>[]>('relayTokenChallenges')) ?? [];
+    return Array.isArray(challenges) ? challenges : [];
+  }
+
+  async writeRelayTokenChallenges(challenges: Record<string, any>[]): Promise<void> {
+    await this.state.storage.put('relayTokenChallenges', challenges.slice(0, 8));
+  }
+
+  async createRelayTokenChallenge(): Promise<Response> {
+    if (await this.state.storage.get<string>('revokedAt')) {
+      return jsonResponse(
+        { status: 'error', code: 'SESSION_REVOKED', message: 'Local daemon session was revoked.' },
+        403
+      );
+    }
+    const agentId = (await this.state.storage.get<string>('agentId')) ?? null;
+    const agentPublicKey = (await this.state.storage.get<string>('agentPublicKey')) ?? null;
+    if (!agentId || !agentPublicKey) {
+      return jsonResponse(
+        {
+          status: 'error',
+          code: 'AGENT_IDENTITY_NOT_CONFIGURED',
+          message: 'Daemon identity is not paired for this AgentSession.',
+        },
+        409
+      );
+    }
+    const nowMs = Date.now();
+    const challenge = {
+      challenge_id: randomToken('rtc'),
+      challenge: randomToken('rch'),
+      created_at_ms: nowMs,
+      expires_at_ms: nowMs + RELAY_TOKEN_REFRESH_CHALLENGE_TTL_MS,
+    };
+    const current = (await this.readRelayTokenChallenges()).filter(
+      (item) => Number(item.expires_at_ms || 0) > nowMs
+    );
+    await this.writeRelayTokenChallenges([challenge, ...current]);
+    return jsonResponse({
+      status: 'ok',
+      agent_id: agentId,
+      agent_public_key_id: (await this.state.storage.get<string>('agentPublicKeyId')) ?? null,
+      challenge_id: challenge.challenge_id,
+      challenge: challenge.challenge,
+      expires_at: new Date(challenge.expires_at_ms).toISOString(),
+    });
+  }
+
+  async refreshRelayToken(body: Record<string, any>): Promise<Response> {
+    if (await this.state.storage.get<string>('revokedAt')) {
+      return jsonResponse(
+        { status: 'error', code: 'SESSION_REVOKED', message: 'Local daemon session was revoked.' },
+        403
+      );
+    }
+    const agentId = (await this.state.storage.get<string>('agentId')) ?? '';
+    const agentPublicKey = (await this.state.storage.get<string>('agentPublicKey')) ?? '';
+    if (!agentId || !agentPublicKey) {
+      return jsonResponse(
+        {
+          status: 'error',
+          code: 'AGENT_IDENTITY_NOT_CONFIGURED',
+          message: 'Daemon identity is not paired for this AgentSession.',
+        },
+        409
+      );
+    }
+    const nowMs = Date.now();
+    const challenges = await this.readRelayTokenChallenges();
+    const challenge = challenges.find(
+      (item) =>
+        item.challenge_id === body.challenge_id &&
+        item.challenge === body.challenge &&
+        Number(item.expires_at_ms || 0) > nowMs
+    );
+    if (!challenge) {
+      return jsonResponse(
+        {
+          status: 'error',
+          code: 'RELAY_REFRESH_CHALLENGE_INVALID',
+          message: 'Relay refresh challenge is missing or expired.',
+        },
+        401
+      );
+    }
+    const proofCheck = await verifyDaemonRelayRefreshProof(body, {
+      agentId,
+      agentPublicKey,
+      nowMs,
+    });
+    if (!proofCheck.ok) {
+      return jsonResponse(
+        {
+          status: 'error',
+          code: proofCheck.code,
+          message: proofCheck.message,
+        },
+        401
+      );
+    }
+    const relayToken = randomToken('rt');
+    const relayTokenExpiresAtMs = nowMs + RELAY_TOKEN_TTL_MS;
+    try {
+      this.socket?.close(1012, 'relay token refreshed');
+    } catch {
+      /* socket may already be closed */
+    }
+    this.socket = null;
+    await this.state.storage.put('relayTokenHash', await sha256Hex(relayToken));
+    await this.state.storage.put('relayTokenExpiresAtMs', relayTokenExpiresAtMs);
+    await this.state.storage.put('workerBridgeSeq', 0);
+    await this.state.storage.put('daemonBridgeSeq', 0);
+    await this.writeRelayTokenChallenges(
+      challenges.filter((item) => item.challenge_id !== challenge.challenge_id)
+    );
+    const refreshedAt = nowIso();
+    await this.state.storage.put('relayTokenRefreshedAt', refreshedAt);
+    await this.state.storage.put('relayTokenRefreshProofIssuedAt', proofCheck.proof_issued_at);
+    await this.state.storage.put('disconnectedAtMs', nowMs);
+    return jsonResponse({
+      status: 'ok',
+      agent_id: agentId,
+      relay_token: relayToken,
+      relay_token_expires_at: new Date(relayTokenExpiresAtMs).toISOString(),
+      refreshed_at: refreshedAt,
+    });
+  }
+
   async acceptWebSocket(req: Request): Promise<Response> {
+    if (await this.state.storage.get<string>('revokedAt')) {
+      return jsonResponse(
+        { status: 'error', code: 'SESSION_REVOKED', message: 'Local daemon session was revoked.' },
+        403
+      );
+    }
     const relayCheck = await checkToken({
       token: tokenFromRequest(req),
       expectedHash: (await this.state.storage.get<string>('relayTokenHash')) ?? null,
@@ -1187,6 +1845,7 @@ export class AgentSession {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
+    const selectedProtocol = relayProtocolFromRequest(req);
     const url = new URL(req.url);
     const parts = url.pathname.split('/').filter(Boolean);
     const agentIdIndex = parts.indexOf('local-agents') + 1;
@@ -1197,9 +1856,10 @@ export class AgentSession {
     await this.state.storage.put('agentId', agentId);
     await this.state.storage.put('connectedAtMs', Date.now());
     await this.state.storage.put('lastHeartbeatMs', Date.now());
+    const workerIdentity = await this.ensureWorkerBridgeIdentity();
     server.addEventListener('message', (event) => {
       this.handleMessage(String(event.data)).catch((e) => {
-        this.send({
+        void this.send({
           kind: 'error',
           message_id: randomId('err'),
           issued_at: nowIso(),
@@ -1211,13 +1871,25 @@ export class AgentSession {
       this.socket = null;
       this.state.storage.put('disconnectedAtMs', Date.now());
     });
-    this.send({
+    await this.send({
       kind: 'session_accepted',
       message_id: randomId('msg'),
       issued_at: nowIso(),
-      payload: { agent_id: agentId },
+      payload: {
+        agent_id: agentId,
+        worker_public_key: workerIdentity.public_key_spki,
+        worker_public_key_alg: workerIdentity.algorithm,
+        worker_public_key_encoding: workerIdentity.public_key_encoding,
+        worker_public_key_id: workerIdentity.key_id,
+      },
     });
-    return new Response(null, { status: 101, webSocket: client });
+    await this.resumeAcknowledgedCommands();
+    await this.replayPendingCommands();
+    return new Response(null, {
+      status: 101,
+      webSocket: client,
+      headers: selectedProtocol ? { 'Sec-WebSocket-Protocol': selectedProtocol } : undefined,
+    });
   }
 
   async handleMessage(raw: string): Promise<void> {
@@ -1225,7 +1897,7 @@ export class AgentSession {
     try {
       msg = JSON.parse(raw) as AgentSessionMessage;
     } catch {
-      this.send({
+      await this.send({
         kind: 'error',
         message_id: randomId('err'),
         issued_at: nowIso(),
@@ -1233,6 +1905,115 @@ export class AgentSession {
       });
       return;
     }
+    const signatureCheck = await verifyBridgeEnvelope(
+      msg,
+      (await this.state.storage.get<string>('relayTokenHash')) ?? null
+    );
+    if (!signatureCheck.ok) {
+      await this.state.storage.put('lastMessage', {
+        received_at: nowIso(),
+        kind: msg.kind ?? 'unknown',
+        payload: {
+          code: signatureCheck.code,
+          message: signatureCheck.message,
+          message_id: msg.message_id ?? null,
+        },
+      });
+      await this.send({
+        kind: 'error',
+        message_id: randomId('err'),
+        issued_at: nowIso(),
+        payload: {
+          code: signatureCheck.code,
+          message: signatureCheck.message,
+          message_id: msg.message_id ?? null,
+        },
+      });
+      return;
+    }
+    const identitySignatureCheck = await verifyDaemonBridgeIdentityEnvelope(msg, {
+      agentPublicKey: (await this.state.storage.get<string>('agentPublicKey')) ?? null,
+      agentPublicKeyId: (await this.state.storage.get<string>('agentPublicKeyId')) ?? null,
+    });
+    if (!identitySignatureCheck.ok) {
+      await this.state.storage.put('lastMessage', {
+        received_at: nowIso(),
+        kind: msg.kind ?? 'unknown',
+        payload: {
+          code: identitySignatureCheck.code,
+          message: identitySignatureCheck.message,
+          message_id: msg.message_id ?? null,
+          agent_public_key_id: (msg as Record<string, any>).agent_public_key_id ?? null,
+        },
+      });
+      await this.send({
+        kind: 'error',
+        message_id: randomId('err'),
+        issued_at: nowIso(),
+        payload: {
+          code: identitySignatureCheck.code,
+          message: identitySignatureCheck.message,
+          message_id: msg.message_id ?? null,
+        },
+      });
+      return;
+    }
+    const timingCheck = validateBridgeEnvelopeTiming(msg);
+    if (!timingCheck.ok) {
+      await this.state.storage.put('lastMessage', {
+        received_at: nowIso(),
+        kind: msg.kind ?? 'unknown',
+        payload: {
+          code: timingCheck.code,
+          message: timingCheck.message,
+          message_id: msg.message_id ?? null,
+          issued_at: msg.issued_at ?? null,
+          expires_at: (msg as Record<string, any>).expires_at ?? null,
+        },
+      });
+      await this.send({
+        kind: 'error',
+        message_id: randomId('err'),
+        issued_at: nowIso(),
+        payload: {
+          code: timingCheck.code,
+          message: timingCheck.message,
+          message_id: msg.message_id ?? null,
+        },
+      });
+      return;
+    }
+    const sequenceCheck = validateBridgeEnvelopeSequence(
+      msg,
+      (await this.state.storage.get<number>('daemonBridgeSeq')) ?? 0
+    );
+    if (!sequenceCheck.ok) {
+      await this.state.storage.put('lastMessage', {
+        received_at: nowIso(),
+        kind: msg.kind ?? 'unknown',
+        payload: {
+          code: sequenceCheck.code,
+          message: sequenceCheck.message,
+          message_id: msg.message_id ?? null,
+          seq: msg.seq ?? null,
+          last_seq: sequenceCheck.last_seq ?? null,
+        },
+      });
+      await this.send({
+        kind: 'error',
+        message_id: randomId('err'),
+        issued_at: nowIso(),
+        payload: {
+          code: sequenceCheck.code,
+          message: sequenceCheck.message,
+          message_id: msg.message_id ?? null,
+          seq: msg.seq ?? null,
+          last_seq: sequenceCheck.last_seq ?? null,
+        },
+      });
+      return;
+    }
+    await this.state.storage.put('daemonBridgeSeq', sequenceCheck.seq);
     if (msg.kind === 'hello' || msg.kind === 'heartbeat' || msg.kind === 'agent.status') {
       await this.state.storage.put('lastHeartbeatMs', Date.now());
       await this.state.storage.put('lastStatus', msg.payload ?? {});
@@ -1252,6 +2033,15 @@ export class AgentSession {
       await this.rememberCommandResult(msg);
       return;
     }
+    if (msg.kind === 'command_ack') {
+      await this.rememberCommandAck(msg);
+      await this.state.storage.put('lastMessage', {
+        received_at: nowIso(),
+        kind: msg.kind,
+        payload: msg.payload ?? {},
+      });
+      return;
+    }
     await this.state.storage.put('lastMessage', {
       received_at: nowIso(),
       kind: msg.kind ?? 'unknown',
@@ -1259,9 +2049,65 @@ export class AgentSession {
     });
   }
 
+  async revokeAgent(req: Request): Promise<Response> {
+    const authError = await this.assertOwner(req);
+    if (authError) return authError;
+    const revokedAt = nowIso();
+    await this.state.storage.put('revokedAt', revokedAt);
+    await this.state.storage.put('revokedReason', 'owner_remote_revoke');
+    const message = {
+      kind: 'session_revoked',
+      message_id: randomId('msg'),
+      issued_at: revokedAt,
+      payload: { reason: 'owner_remote_revoke' },
+    };
+    try {
+      await this.send(message);
+      this.socket?.close(1008, 'session revoked');
+    } catch {
+      /* socket may already be closed */
+    }
+    await this.state.storage.delete('relayTokenHash');
+    await this.state.storage.delete('relayTokenExpiresAtMs');
+    await this.state.storage.delete('ownerControlTokenHash');
+    await this.state.storage.delete('ownerControlTokenExpiresAtMs');
+    await this.state.storage.delete('activeProcess');
+    this.socket = null;
+    await this.state.storage.put('disconnectedAtMs', Date.now());
+    await this.state.storage.put('lastMessage', {
+      received_at: revokedAt,
+      kind: 'session_revoked',
+      payload: message.payload,
+    });
+    return jsonResponse({
+      status: 'ok',
+      agent_id: await this.state.storage.get('agentId'),
+      revoked_at: revokedAt,
+    });
+  }
+
+  async enqueueActivityTail(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    const requestedLimit = Number(url.searchParams.get('limit') || 50);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.max(1, Math.min(200, Math.trunc(requestedLimit)))
+      : 50;
+    return this.enqueueCommand(req, {
+      type: 'activity.tail',
+      payload: { limit },
+      idempotency_key: `activity_tail_${crypto.randomUUID()}`,
+    });
+  }
+
   async enqueueCommand(req: Request, body: Record<string, any>): Promise<Response> {
     const authError = await this.assertOwner(req);
     if (authError) return authError;
+    if (await this.state.storage.get<string>('revokedAt')) {
+      return jsonResponse(
+        { status: 'error', code: 'SESSION_REVOKED', message: 'Local daemon session was revoked.' },
+        409
+      );
+    }
 
     const type = String(body.type ?? '');
     if (!type) {
@@ -1276,28 +2122,118 @@ export class AgentSession {
         422
       );
     }
-    if (!this.socket) {
-      return jsonResponse(
-        { status: 'error', code: 'AGENT_OFFLINE', message: 'Local daemon is not connected.' },
-        409
-      );
+    await this.expirePendingReplayCommands();
+    await this.expireQueuedCommandRecords();
+    const requestedIdempotencyKey =
+      typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : '';
+    if (requestedIdempotencyKey) {
+      const records = await this.readCommandRecords();
+      const existing = records.find((item) => item.idempotency_key === requestedIdempotencyKey);
+      if (existing) {
+        if (existing.type !== type) {
+          return jsonResponse(
+            {
+              status: 'error',
+              code: 'IDEMPOTENCY_KEY_CONFLICT',
+              message: 'idempotency_key was already used for a different command type.',
+              command_record: existing,
+            },
+            409
+          );
+        }
+        return jsonResponse({
+          status: 'ok',
+          queued: existing.command_status !== 'result',
+          duplicate: true,
+          command_record: existing,
+        });
+      }
     }
     const command = {
       kind: 'command',
       message_id: randomId('cmd'),
       issued_at: nowIso(),
       expires_at: new Date(Date.now() + 120_000).toISOString(),
-      idempotency_key: String(body.idempotency_key || crypto.randomUUID()),
+      idempotency_key: requestedIdempotencyKey || crypto.randomUUID(),
       payload: { type, ...(body.payload && typeof body.payload === 'object' ? body.payload : {}) },
     };
-    this.send(command);
+    const replayable = isReplayableLocalAgentCommand(type);
+    if (!this.socket && !replayable) {
+      return jsonResponse(
+        {
+          status: 'error',
+          code: 'AGENT_OFFLINE',
+          message: 'Local daemon is not connected; this command is not replayable.',
+        },
+        409
+      );
+    }
     const n = ((await this.state.storage.get<number>('commandCount')) ?? 0) + 1;
     await this.state.storage.put('commandCount', n);
     const record = await this.rememberCommand(command);
-    return jsonResponse({ status: 'ok', queued: true, command, command_record: record });
+    if (replayable) await this.queueReplayableCommand(command);
+    if (!this.socket) {
+      return jsonResponse({
+        status: 'ok',
+        queued: true,
+        deferred: true,
+        command,
+        command_record: record,
+      });
+    }
+    const sent = await this.send(command);
+    if (sent) await this.rememberCommandSent(command);
+    if (!sent && !replayable) {
+      await this.rememberCommandResult({
+        message_id: randomId('result'),
+        idempotency_key: command.idempotency_key,
+        payload: {
+          command_message_id: command.message_id,
+          status: 'error',
+          code: 'AGENT_OFFLINE',
+          message: 'Local daemon disconnected before the command could be sent.',
+        },
+      });
+      return jsonResponse(
+        {
+          status: 'error',
+          code: 'AGENT_OFFLINE',
+          message: 'Local daemon disconnected before the command could be sent.',
+          command_record: record,
+        },
+        409
+      );
+    }
+    return jsonResponse({
+      status: 'ok',
+      queued: true,
+      deferred: !sent,
+      command,
+      command_record: record,
+    });
   }
 
-  send(message: Record<string, unknown>) {
-    this.socket?.send(JSON.stringify(message));
+  async nextWorkerBridgeSeq(): Promise<number> {
+    const current = (await this.state.storage.get<number>('workerBridgeSeq')) ?? 0;
+    const next = current + 1;
+    await this.state.storage.put('workerBridgeSeq', next);
+    return next;
+  }
+
+  async send(message: Record<string, unknown>): Promise<boolean> {
+    if (!this.socket) return false;
+    const relayTokenHash = (await this.state.storage.get<string>('relayTokenHash')) ?? null;
+    const workerIdentity = await this.ensureWorkerBridgeIdentity();
+    const signedMessage = await signWorkerBridgeEnvelope(
+      { ...message, seq: await this.nextWorkerBridgeSeq() },
+      relayTokenHash,
+      workerIdentity
+    );
+    try {
+      this.socket.send(JSON.stringify(signedMessage));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

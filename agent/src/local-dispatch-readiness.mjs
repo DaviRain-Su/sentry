@@ -2,14 +2,27 @@ import {
   verifyHyperliquidAgentWalletGrantProof,
   verifyVenueKeyOperationalProof,
 } from '../../core/local-secrets.js';
-import { validateEthereumSwapTask } from '../../core/ethereum-trade.js';
-import { validateSolanaSwapTask } from '../../core/solana-trade.js';
-import { resolveEthereumReadConfig } from './ethereum-readonly-adapter.mjs';
+import {
+  ETHEREUM_CHAIN_ID,
+  ETHEREUM_VENUE_ID,
+  validateEthereumSwapTask,
+} from '../../core/ethereum-trade.js';
+import {
+  SOLANA_CHAIN_ID,
+  SOLANA_VENUE_ID,
+  validateSolanaSwapTask,
+} from '../../core/solana-trade.js';
+import { findWalletAccount } from '../../core/wallet-refs.js';
+import {
+  ETHEREUM_MAINNET_RPC_URL,
+  resolveEthereumReadConfig,
+} from './ethereum-readonly-adapter.mjs';
 import { verifyHyperliquidLiveAgentWalletGrant } from './hyperliquid-agent-wallet-adapter.mjs';
 import { resolveHyperliquidUserAddress } from './hyperliquid-readonly-adapter.mjs';
 import { redactCredentialResolution, resolveOkxCredentials } from './local-credential-resolver.mjs';
 import { probeEthereumSigner, probeSolanaSigner } from './local-signer-probe.mjs';
-import { resolveSolanaReadConfig } from './solana-readonly-adapter.mjs';
+import { verifyOkxLiveReadProof } from './okx-readonly-adapter.mjs';
+import { resolveSolanaReadConfig, SOLANA_MAINNET_RPC_URL } from './solana-readonly-adapter.mjs';
 
 function isOkxPlaceOrderTask(task = {}) {
   return task?.venue_id === 'okx' && task?.action?.type === 'place_order';
@@ -107,6 +120,73 @@ function readinessError(payload = {}) {
   };
 }
 
+function upperSnake(value) {
+  return String(value || '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+}
+
+function chainAccountCapabilities(account = {}) {
+  return Array.isArray(account.capabilities) ? account.capabilities : [];
+}
+
+function checkWalletRefCapabilities({ account, venueLabel }) {
+  const capabilities = chainAccountCapabilities(account);
+  if (capabilities.includes('withdraw')) {
+    return {
+      status: 'error',
+      code: 'WITHDRAW_NOT_ALLOWED',
+      message: `${venueLabel} OWS wallet reference must not include withdrawal capability.`,
+    };
+  }
+  const missing = ['read', 'sign', 'submit_tx'].filter(
+    (capability) => !capabilities.includes(capability)
+  );
+  if (missing.length) {
+    return {
+      status: 'error',
+      code: `${upperSnake(venueLabel)}_OWS_WALLET_CAPABILITIES_REQUIRED`,
+      message: `${venueLabel} OWS wallet reference requires capabilities: ${missing.join(', ')}`,
+      missing_capabilities: missing,
+    };
+  }
+  return { status: 'ok', capabilities };
+}
+
+function walletRefProof({ walletStore, chainId, address, venueLabel }) {
+  const matched = findWalletAccount(walletStore, { chain_id: chainId, address });
+  if (matched.status !== 'ok') return matched;
+  if (matched.wallet.status && matched.wallet.status !== 'linked') {
+    return {
+      status: 'error',
+      code: `${upperSnake(venueLabel)}_OWS_WALLET_NOT_LINKED`,
+      message: `${venueLabel} OWS wallet reference is not linked.`,
+      wallet_id: matched.wallet.wallet_id,
+      wallet_status: matched.wallet.status,
+    };
+  }
+  const capabilityProof = checkWalletRefCapabilities({
+    account: matched.account,
+    venueLabel,
+  });
+  if (capabilityProof.status !== 'ok') return capabilityProof;
+  return {
+    status: 'ok',
+    source: 'ows_wallet_ref',
+    wallet_id: matched.wallet.wallet_id,
+    provider: matched.wallet.provider,
+    display_name: matched.wallet.display_name,
+    vault_path: matched.wallet.vault_path,
+    policy_ids: matched.wallet.policy_ids,
+    account_ref: matched.account.address,
+    caip10: matched.account.caip10,
+    chain_id: matched.account.chain_id,
+    capabilities: capabilityProof.capabilities,
+    signing_handoff: 'external_agent_ows',
+  };
+}
+
 export async function getLocalDispatchReadiness(options = {}) {
   const {
     task,
@@ -116,8 +196,10 @@ export async function getLocalDispatchReadiness(options = {}) {
     fetchImpl = fetch,
     now = new Date(),
     verifyHyperliquidLiveGrant = false,
+    verifyOkxLiveRead = false,
     requireSignerProbe = false,
     signerProbeTimeoutMs = 3000,
+    walletStore = null,
     execFileImpl = null,
     rateLimiter = null,
     rateLimitPolicy = {},
@@ -142,6 +224,7 @@ export async function getLocalDispatchReadiness(options = {}) {
       return getSolanaLocalDispatchReadiness({
         task,
         env,
+        walletStore,
         execFileImpl,
         requireSignerProbe,
         signerProbeTimeoutMs,
@@ -151,6 +234,7 @@ export async function getLocalDispatchReadiness(options = {}) {
       return getEthereumLocalDispatchReadiness({
         task,
         env,
+        walletStore,
         execFileImpl,
         requireSignerProbe,
         signerProbeTimeoutMs,
@@ -178,6 +262,7 @@ export async function getLocalDispatchReadiness(options = {}) {
     venue_id: 'okx',
     required_permissions: ['read', 'place_order'],
     require_ip_allowlist: true,
+    now,
   });
   if (operationalProof.status !== 'ok') {
     return readinessError({
@@ -203,6 +288,32 @@ export async function getLocalDispatchReadiness(options = {}) {
     });
   }
 
+  let liveReadProof = null;
+  if (verifyOkxLiveRead) {
+    liveReadProof = await verifyOkxLiveReadProof({
+      credentials: credentials.credentials,
+      keyMetadata,
+      fetchImpl,
+      now,
+      simulated: false,
+      rateLimiter,
+      rateLimitPolicy,
+      sleepImpl,
+    });
+    if (liveReadProof.status !== 'ok') {
+      return readinessError({
+        code: liveReadProof.code,
+        message: liveReadProof.message,
+        venue_id: 'okx',
+        key_handle: keyMetadata.key_handle,
+        credential_resolution: redactCredentialResolution(credentials),
+        operational_proof: operationalProof,
+        live_read_proof: liveReadProof,
+        ready_venue_ids: [],
+      });
+    }
+  }
+
   return {
     status: 'ok',
     venue_id: 'okx',
@@ -219,8 +330,10 @@ export async function getLocalDispatchReadiness(options = {}) {
       ip_allowlist: operationalProof.ip_allowlist,
       permission_proof: operationalProof.permission_proof,
       ip_allowlist_proof: operationalProof.ip_allowlist_proof,
+      rotation_proof: operationalProof.rotation_proof,
     },
     credential_resolution: redactCredentialResolution(credentials),
+    ...(liveReadProof ? { live_read_proof: liveReadProof } : {}),
   };
 }
 
@@ -228,6 +341,7 @@ async function getSolanaLocalDispatchReadiness(options = {}) {
   const {
     task,
     env = process.env,
+    walletStore = null,
     execFileImpl = null,
     requireSignerProbe = false,
     signerProbeTimeoutMs = 3000,
@@ -241,28 +355,80 @@ async function getSolanaLocalDispatchReadiness(options = {}) {
       ready_venue_ids: [],
     });
   }
-  const config = resolveSolanaReadConfig(env);
-  if (config.status !== 'ok') {
-    return readinessError({
-      code: config.code,
-      message: config.message,
-      venue_id: 'solana-mainnet',
-      ready_venue_ids: [],
-    });
-  }
   const owner = solanaOwnerFromTask(task);
+  const envConfig = resolveSolanaReadConfig(env);
+  let config = null;
+  let walletRef = null;
+  if (envConfig.status === 'ok' && (!owner || owner === envConfig.owner)) {
+    config = {
+      owner: envConfig.owner,
+      rpc_url: envConfig.rpc_url,
+      source: 'env',
+    };
+  } else {
+    const proof = walletRefProof({
+      walletStore,
+      chainId: SOLANA_CHAIN_ID,
+      address: owner,
+      venueLabel: 'Solana',
+    });
+    if (proof.status !== 'ok') {
+      if (proof.status !== 'missing') {
+        return readinessError({
+          code: proof.code,
+          message: proof.message,
+          venue_id: SOLANA_VENUE_ID,
+          wallet_ref: proof,
+          ready_venue_ids: [],
+        });
+      }
+      if (envConfig.status !== 'ok') {
+        return readinessError({
+          code: envConfig.code,
+          message: envConfig.message,
+          venue_id: SOLANA_VENUE_ID,
+          wallet_ref: proof,
+          ready_venue_ids: [],
+        });
+      }
+      return readinessError({
+        code: 'SOLANA_LOCAL_ACCOUNT_MISMATCH',
+        message:
+          'Solana task owner must match the locally configured wallet address or a linked OWS wallet reference.',
+        venue_id: SOLANA_VENUE_ID,
+        expected_owner: owner,
+        configured_owner: envConfig.owner,
+        wallet_ref: proof,
+        ready_venue_ids: [],
+      });
+    }
+    walletRef = proof;
+    config = {
+      owner: proof.account_ref,
+      rpc_url: env.SENTRY_SOLANA_RPC_URL || SOLANA_MAINNET_RPC_URL,
+      source: 'ows_wallet_ref',
+    };
+  }
   if (owner && owner !== config.owner) {
     return readinessError({
       code: 'SOLANA_LOCAL_ACCOUNT_MISMATCH',
       message: 'Solana task owner must match the locally configured wallet address.',
-      venue_id: 'solana-mainnet',
+      venue_id: SOLANA_VENUE_ID,
       expected_owner: owner,
       configured_owner: config.owner,
       ready_venue_ids: [],
     });
   }
+  const signerProbeEnv =
+    config.source === 'ows_wallet_ref'
+      ? {
+          ...env,
+          SENTRY_SOLANA_WALLET_ADDRESS: config.owner,
+          SENTRY_SOLANA_RPC_URL: config.rpc_url,
+        }
+      : env;
   const signerProbe = await probeSolanaSigner({
-    env,
+    env: signerProbeEnv,
     execFileImpl,
     timeoutMs: signerProbeTimeoutMs,
   });
@@ -270,28 +436,30 @@ async function getSolanaLocalDispatchReadiness(options = {}) {
     return readinessError({
       code: signerProbe.code || 'SOLANA_SIGNER_PROBE_REQUIRED',
       message: signerProbe.message || 'Solana local dispatch requires signer probe proof.',
-      venue_id: 'solana-mainnet',
+      venue_id: SOLANA_VENUE_ID,
       signer_probe: signerProbe,
+      wallet_ref: walletRef,
       ready_venue_ids: [],
     });
   }
   return {
     status: 'ok',
-    venue_id: 'solana-mainnet',
+    venue_id: SOLANA_VENUE_ID,
     account_ref: config.owner,
     wallet_address: config.owner,
     rpc_url: config.rpc_url,
     dispatch_ready_source: 'local_daemon',
-    ready_venue_ids: ['solana-mainnet'],
+    ready_venue_ids: [SOLANA_VENUE_ID],
     local_account_proof: {
       status: 'ok',
-      venue_id: 'solana-mainnet',
+      venue_id: SOLANA_VENUE_ID,
       account_ref: config.owner,
       rpc_url: config.rpc_url,
-      source: 'env',
+      source: config.source,
       owner: config.owner,
       required_capabilities: ['read', 'sign', 'submit_tx'],
       signer_probe: signerProbe,
+      wallet_ref: walletRef,
     },
   };
 }
@@ -300,6 +468,7 @@ async function getEthereumLocalDispatchReadiness(options = {}) {
   const {
     task,
     env = process.env,
+    walletStore = null,
     execFileImpl = null,
     requireSignerProbe = false,
     signerProbeTimeoutMs = 3000,
@@ -309,32 +478,84 @@ async function getEthereumLocalDispatchReadiness(options = {}) {
     return readinessError({
       code: taskCheck.code,
       message: taskCheck.message,
-      venue_id: 'ethereum-mainnet',
-      ready_venue_ids: [],
-    });
-  }
-  const config = resolveEthereumReadConfig(env);
-  if (config.status !== 'ok') {
-    return readinessError({
-      code: config.code,
-      message: config.message,
-      venue_id: 'ethereum-mainnet',
+      venue_id: ETHEREUM_VENUE_ID,
       ready_venue_ids: [],
     });
   }
   const account = ethereumAccountFromTask(task);
+  const envConfig = resolveEthereumReadConfig(env);
+  let config = null;
+  let walletRef = null;
+  if (envConfig.status === 'ok' && (!account || account === envConfig.owner)) {
+    config = {
+      owner: envConfig.owner,
+      rpc_url: envConfig.rpc_url,
+      source: 'env',
+    };
+  } else {
+    const proof = walletRefProof({
+      walletStore,
+      chainId: ETHEREUM_CHAIN_ID,
+      address: account,
+      venueLabel: 'Ethereum',
+    });
+    if (proof.status !== 'ok') {
+      if (proof.status !== 'missing') {
+        return readinessError({
+          code: proof.code,
+          message: proof.message,
+          venue_id: ETHEREUM_VENUE_ID,
+          wallet_ref: proof,
+          ready_venue_ids: [],
+        });
+      }
+      if (envConfig.status !== 'ok') {
+        return readinessError({
+          code: envConfig.code,
+          message: envConfig.message,
+          venue_id: ETHEREUM_VENUE_ID,
+          wallet_ref: proof,
+          ready_venue_ids: [],
+        });
+      }
+      return readinessError({
+        code: 'ETHEREUM_LOCAL_ACCOUNT_MISMATCH',
+        message:
+          'Ethereum task account must match the locally configured wallet address or a linked OWS wallet reference.',
+        venue_id: ETHEREUM_VENUE_ID,
+        expected_account: account,
+        configured_account: envConfig.owner,
+        wallet_ref: proof,
+        ready_venue_ids: [],
+      });
+    }
+    walletRef = proof;
+    config = {
+      owner: proof.account_ref.toLowerCase(),
+      rpc_url: env.SENTRY_ETHEREUM_RPC_URL || ETHEREUM_MAINNET_RPC_URL,
+      source: 'ows_wallet_ref',
+    };
+  }
   if (account && account !== config.owner) {
     return readinessError({
       code: 'ETHEREUM_LOCAL_ACCOUNT_MISMATCH',
       message: 'Ethereum task account must match the locally configured wallet address.',
-      venue_id: 'ethereum-mainnet',
+      venue_id: ETHEREUM_VENUE_ID,
       expected_account: account,
       configured_account: config.owner,
       ready_venue_ids: [],
     });
   }
+  const signerProbeEnv =
+    config.source === 'ows_wallet_ref'
+      ? {
+          ...env,
+          SENTRY_ETHEREUM_WALLET_ADDRESS: config.owner,
+          SENTRY_ETHEREUM_RPC_URL: config.rpc_url,
+        }
+      : env;
   const signerProbe = await probeEthereumSigner({
-    env,
+    env: signerProbeEnv,
     execFileImpl,
     timeoutMs: signerProbeTimeoutMs,
   });
@@ -342,28 +563,30 @@ async function getEthereumLocalDispatchReadiness(options = {}) {
     return readinessError({
       code: signerProbe.code || 'ETHEREUM_SIGNER_PROBE_REQUIRED',
       message: signerProbe.message || 'Ethereum local dispatch requires signer probe proof.',
-      venue_id: 'ethereum-mainnet',
+      venue_id: ETHEREUM_VENUE_ID,
       signer_probe: signerProbe,
+      wallet_ref: walletRef,
       ready_venue_ids: [],
     });
   }
   return {
     status: 'ok',
-    venue_id: 'ethereum-mainnet',
+    venue_id: ETHEREUM_VENUE_ID,
     account_ref: config.owner,
     wallet_address: config.owner,
     rpc_url: config.rpc_url,
     dispatch_ready_source: 'local_daemon',
-    ready_venue_ids: ['ethereum-mainnet'],
+    ready_venue_ids: [ETHEREUM_VENUE_ID],
     local_account_proof: {
       status: 'ok',
-      venue_id: 'ethereum-mainnet',
+      venue_id: ETHEREUM_VENUE_ID,
       account_ref: config.owner,
       rpc_url: config.rpc_url,
-      source: 'env',
+      source: config.source,
       account: config.owner,
       required_capabilities: ['read', 'sign', 'submit_tx'],
       signer_probe: signerProbe,
+      wallet_ref: walletRef,
     },
   };
 }
@@ -395,6 +618,7 @@ async function getHyperliquidLocalDispatchReadiness(options = {}) {
     venue_id: 'hyperliquid',
     required_permissions: ['read', 'place_order'],
     require_ip_allowlist: false,
+    now,
   });
   if (operationalProof.status !== 'ok') {
     return readinessError({
@@ -477,6 +701,7 @@ async function getHyperliquidLocalDispatchReadiness(options = {}) {
       ip_allowlist: operationalProof.ip_allowlist,
       permission_proof: operationalProof.permission_proof,
       ip_allowlist_proof: operationalProof.ip_allowlist_proof,
+      rotation_proof: operationalProof.rotation_proof,
     },
     agent_wallet_grant: agentWalletGrant,
     ...(agentWalletLiveGrant ? { agent_wallet_live_grant: agentWalletLiveGrant } : {}),

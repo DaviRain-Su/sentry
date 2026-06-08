@@ -39,12 +39,17 @@ if (process.argv.includes('--version')) {
     display_name: 'Codex CLI',
     command: `${process.execPath} ${fakeAgent}`,
     capabilities: ['read_context', 'build_transaction', 'return_evidence'],
+    task_capabilities: ['okx:place_order', 'solana-mainnet:submit_tx'],
     enabled: true,
   });
   assert.equal(okProbe.status, 'ok');
   assert.equal(okProbe.profile.kind, 'codex');
   assert.equal(okProbe.version_output, 'codex 1.2.3');
   assert.equal(okProbe.capabilities.missing_capabilities.length, 0);
+  assert.deepEqual(okProbe.capabilities.declared_task_capabilities, [
+    { venue_id: 'okx', action_type: 'place_order' },
+    { venue_id: 'solana-mainnet', action_type: 'submit_tx' },
+  ]);
 
   const partialProbe = await probeRegisteredAgent({
     agent_id: 'codex',
@@ -83,6 +88,7 @@ if (process.argv.includes('--version')) {
       agent_id: 'codex',
       command: `${process.execPath} ${fakeAgent}`,
       capabilities: ['read_context', 'build_transaction', 'return_evidence'],
+      task_capabilities: ['ethereum:swap'],
     },
     { configPath }
   );
@@ -92,6 +98,9 @@ if (process.argv.includes('--version')) {
   assert.equal(registryProbe.status, 'ok');
   assert.equal(registryProbe.probe_count, 1);
   assert.equal(registryProbe.probes[0].version_output, 'codex 1.2.3');
+  assert.deepEqual(registryProbe.probes[0].capabilities.declared_task_capabilities, [
+    { venue_id: 'ethereum-mainnet', action_type: 'submit_tx' },
+  ]);
 
   const missingProbe = await probeAgentRegistry(registry, { agent_id: 'missing' });
   assert.equal(missingProbe.status, 'blocked');

@@ -4,6 +4,7 @@ import {
   isEthereumTxHash,
   verifyEthereumAgentTaskResult,
 } from '../../core/ethereum-trade.js';
+import { chainRpcRetrySummary, fetchChainRpcJsonWithBackoff } from './chain-rpc-rate-limit.mjs';
 import { ETHEREUM_MAINNET_RPC_URL, ethereumRpcRequest } from './ethereum-readonly-adapter.mjs';
 
 function txHashFromResult(result = {}) {
@@ -121,6 +122,9 @@ export async function fetchEthereumTransactionReceipt({
   env = process.env,
   fetchImpl = fetch,
   now = new Date(),
+  rateLimiter = null,
+  rateLimitPolicy = {},
+  sleepImpl,
 } = {}) {
   const taskResult = result || {};
   const taskCheck = verifyEthereumAgentTaskResult(taskResult, task);
@@ -128,12 +132,30 @@ export async function fetchEthereumTransactionReceipt({
   const request = ethereumTransactionReceiptRequest({ task, result: taskResult, txHash });
   if (request.status !== 'ok') return request;
   const rpcUrl = env.SENTRY_ETHEREUM_RPC_URL || ETHEREUM_MAINNET_RPC_URL;
-  const response = await fetchImpl(rpcUrl, {
-    method: request.method,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request.body),
+  const fetched = await fetchChainRpcJsonWithBackoff({
+    policy: rateLimitPolicy,
+    sleep: sleepImpl,
+    rateLimiter,
+    bucket: 'ethereum:eth_getTransactionReceipt',
+    fetchOnce: async () => {
+      const response = await fetchImpl(rpcUrl, {
+        method: request.method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request.body),
+      });
+      const body = await response.json();
+      return { response, body };
+    },
   });
-  const body = await response.json();
+  if (fetched.error) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_NETWORK_ERROR',
+      message: fetched.error?.message || String(fetched.error),
+      retry: chainRpcRetrySummary(fetched),
+    };
+  }
+  const { response, body } = fetched;
   if (!response.ok || body.error) {
     return {
       status: 'error',
@@ -142,11 +164,15 @@ export async function fetchEthereumTransactionReceipt({
       http_status: response.status,
       message: body.error?.message || `Ethereum HTTP ${response.status}`,
       ethereum_body: body,
+      retry: chainRpcRetrySummary(fetched),
     };
   }
-  return normalizeEthereumTransactionReceiptResponse(body, {
-    tx_hash: request.tx_hash,
-    idempotency_key: request.idempotency_key,
-    observed_at: (typeof now === 'function' ? now() : now).toISOString(),
-  });
+  return {
+    ...normalizeEthereumTransactionReceiptResponse(body, {
+      tx_hash: request.tx_hash,
+      idempotency_key: request.idempotency_key,
+      observed_at: (typeof now === 'function' ? now() : now).toISOString(),
+    }),
+    retry: chainRpcRetrySummary(fetched),
+  };
 }

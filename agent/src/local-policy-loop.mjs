@@ -8,6 +8,15 @@ function safeInteger(value, fallback) {
   return Number.isSafeInteger(number) ? number : fallback;
 }
 
+function listValue(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  return String(value)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function nowIso(now) {
   const value = typeof now === 'function' ? now() : now || new Date();
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -22,6 +31,7 @@ function resultSummary(result = {}) {
     planned_task_count: result.planned_task_count ?? null,
     ready_task_count: result.ready_task_count ?? null,
     dispatched_task_count: result.dispatched_task_count ?? null,
+    skipped_task_count: result.skipped_task_count ?? null,
     blocked_task_count: result.blocked_task_count ?? null,
     result_count: result.result_count ?? null,
   };
@@ -36,17 +46,38 @@ export function normalizePolicyLoopOptions(input = {}) {
     interval_ms: intervalMs,
     limit: Math.max(0, safeInteger(input.limit, 50)),
     check_readiness: Boolean(input.checkReadiness ?? input.check_readiness ?? input.dispatch),
+    check_inventory: Boolean(input.checkInventory ?? input.check_inventory),
+    live_inventory: Boolean(input.liveInventory ?? input.live_inventory),
+    live_market: Boolean(input.liveMarket ?? input.live_market),
     dispatch: Boolean(input.dispatch),
     mark_ticks: input.markTicks ?? input.mark_ticks ?? input.mark !== false,
     verify_receipt: input.verifyReceipt ?? input.verify_receipt ?? true,
     verify_live_grant: Boolean(input.verifyHyperliquidLiveGrant ?? input.verify_live_grant),
+    verify_okx_live_read: Boolean(input.verifyOkxLiveRead ?? input.verify_okx_live_read),
     require_signer_probe: Boolean(input.requireSignerProbe ?? input.require_signer_probe),
     signer_probe_timeout_ms: Math.max(
       1,
       safeInteger(input.signerProbeTimeoutMs ?? input.signer_probe_timeout_ms, 3000)
     ),
     timeout_ms: Math.max(1, safeInteger(input.timeoutMs ?? input.timeout_ms, 30_000)),
+    signer_timeout_ms: Math.max(
+      1,
+      safeInteger(input.signerTimeoutMs ?? input.signer_timeout_ms, 30_000)
+    ),
+    solana_signer_command:
+      input.solanaSignerCommand ??
+      input.solana_signer_command ??
+      process.env.SENTRY_SOLANA_SIGNER_COMMAND ??
+      null,
+    ethereum_signer_command:
+      input.ethereumSignerCommand ??
+      input.ethereum_signer_command ??
+      process.env.SENTRY_ETHEREUM_SIGNER_COMMAND ??
+      null,
     simulated: input.simulated !== false,
+    market_snapshot: input.marketSnapshot ?? input.market_snapshot ?? null,
+    market_venues: listValue(input.marketVenues ?? input.market_venues),
+    market_symbols: listValue(input.marketSymbols ?? input.market_symbols),
   };
 }
 
@@ -103,11 +134,34 @@ export function createLocalPolicyLoop(options = {}) {
         now: runNowDate,
         limit: effectiveOptions.limit,
         checkReadiness: effectiveOptions.check_readiness,
+        checkInventory: effectiveOptions.check_inventory,
+        liveInventory: effectiveOptions.live_inventory,
+        ...(effectiveOptions.market_snapshot
+          ? { marketSnapshot: effectiveOptions.market_snapshot }
+          : {}),
+        ...(effectiveOptions.live_market && context.liveMarketSnapshotReader
+          ? {
+              getMarketSnapshot: (request) =>
+                context.liveMarketSnapshotReader({
+                  ...request,
+                  venues: effectiveOptions.market_venues.length
+                    ? effectiveOptions.market_venues
+                    : request?.venues,
+                  symbols: effectiveOptions.market_symbols.length
+                    ? effectiveOptions.market_symbols
+                    : request?.symbols,
+                }),
+            }
+          : {}),
         dispatch: effectiveOptions.dispatch,
         markTicks: effectiveOptions.mark_ticks,
         timeoutMs: effectiveOptions.timeout_ms,
+        signerTimeoutMs: effectiveOptions.signer_timeout_ms,
+        solanaSignerCommand: effectiveOptions.solana_signer_command,
+        ethereumSignerCommand: effectiveOptions.ethereum_signer_command,
         verifyReceipt: effectiveOptions.verify_receipt,
         verifyHyperliquidLiveGrant: effectiveOptions.verify_live_grant,
+        verifyOkxLiveRead: effectiveOptions.verify_okx_live_read,
         requireSignerProbe: effectiveOptions.require_signer_probe,
         signerProbeTimeoutMs: effectiveOptions.signer_probe_timeout_ms,
         simulated: effectiveOptions.simulated,

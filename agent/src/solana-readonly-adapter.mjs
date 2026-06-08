@@ -1,5 +1,9 @@
+import { getTokenByAddress, getTokenBySymbol } from '../../core/token-registry.js';
+import { chainRpcRetrySummary, fetchChainRpcJsonWithBackoff } from './chain-rpc-rate-limit.mjs';
+
 export const SOLANA_MAINNET_RPC_URL = 'https://api.mainnet-beta.solana.com';
 export const SOLANA_TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+export const SOLANA_CHAIN_ID = 'solana:mainnet';
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export function isSolanaAddress(value) {
@@ -31,13 +35,41 @@ export function solanaRpcRequest(method, params = [], id = 1) {
   };
 }
 
-async function postSolanaRpc({ rpcUrl, method, params, fetchImpl, id }) {
-  const response = await fetchImpl(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(solanaRpcRequest(method, params, id)),
+async function postSolanaRpc({
+  rpcUrl,
+  method,
+  params,
+  fetchImpl,
+  id,
+  rateLimiter = null,
+  rateLimitPolicy = {},
+  sleepImpl,
+}) {
+  const requestBody = solanaRpcRequest(method, params, id);
+  const fetched = await fetchChainRpcJsonWithBackoff({
+    policy: rateLimitPolicy,
+    sleep: sleepImpl,
+    rateLimiter,
+    bucket: `solana:${method}`,
+    fetchOnce: async () => {
+      const response = await fetchImpl(rpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      const body = await response.json();
+      return { response, body };
+    },
   });
-  const body = await response.json();
+  if (fetched.error) {
+    return {
+      status: 'error',
+      code: 'SOLANA_NETWORK_ERROR',
+      message: fetched.error?.message || String(fetched.error),
+      retry: chainRpcRetrySummary(fetched),
+    };
+  }
+  const { response, body } = fetched;
   if (!response.ok || body.error) {
     return {
       status: 'error',
@@ -45,9 +77,10 @@ async function postSolanaRpc({ rpcUrl, method, params, fetchImpl, id }) {
       rpc_code: body.error?.code ?? null,
       http_status: response.status,
       message: body.error?.message || `Solana HTTP ${response.status}`,
+      retry: chainRpcRetrySummary(fetched),
     };
   }
-  return { status: 'ok', body };
+  return { status: 'ok', body, retry: chainRpcRetrySummary(fetched) };
 }
 
 function decimalFromAmount(amount, decimals) {
@@ -61,15 +94,17 @@ function decimalFromAmount(amount, decimals) {
 }
 
 export function normalizeSolanaBalanceResponses({ owner, balanceBody, tokenBody, observedAt }) {
+  const nativeToken = getTokenBySymbol(SOLANA_CHAIN_ID, 'SOL');
   const positions = [
     {
       venue_id: 'solana-mainnet',
       source_type: 'chain_rpc',
       account_ref: owner,
-      asset: 'SOL',
+      asset: nativeToken?.symbol || 'SOL',
       quantity: decimalFromAmount(balanceBody?.result?.value || 0, 9),
       raw_amount: String(balanceBody?.result?.value || '0'),
-      decimals: 9,
+      decimals: nativeToken?.decimals || 9,
+      token_metadata: nativeToken,
       observed_at: observedAt,
     },
   ];
@@ -77,17 +112,19 @@ export function normalizeSolanaBalanceResponses({ owner, balanceBody, tokenBody,
   for (const item of tokenBody?.result?.value || []) {
     const info = item.account?.data?.parsed?.info;
     const tokenAmount = info?.tokenAmount || {};
+    const token = getTokenByAddress(SOLANA_CHAIN_ID, info?.mint);
     positions.push({
       venue_id: 'solana-mainnet',
       source_type: 'chain_rpc',
       account_ref: owner,
       token_account: item.pubkey,
-      asset: info?.mint || 'SPL',
+      asset: token?.symbol || info?.mint || 'SPL',
       mint: info?.mint || null,
       quantity:
         tokenAmount.uiAmountString || decimalFromAmount(tokenAmount.amount, tokenAmount.decimals),
       raw_amount: String(tokenAmount.amount || '0'),
-      decimals: Number(tokenAmount.decimals || 0),
+      decimals: token?.decimals || Number(tokenAmount.decimals || 0),
+      token_metadata: token,
       observed_at: observedAt,
     });
   }
@@ -106,6 +143,9 @@ export async function fetchSolanaReadState({
   env = process.env,
   fetchImpl = fetch,
   now = new Date(),
+  rateLimiter = null,
+  rateLimitPolicy = {},
+  sleepImpl,
 } = {}) {
   const config = resolveSolanaReadConfig(env);
   if (config.status !== 'ok') return config;
@@ -116,6 +156,9 @@ export async function fetchSolanaReadState({
     params: [config.owner],
     fetchImpl,
     id: 1,
+    rateLimiter,
+    rateLimitPolicy,
+    sleepImpl,
   });
   if (balance.status !== 'ok') return balance;
   const tokens = await postSolanaRpc({
@@ -124,12 +167,21 @@ export async function fetchSolanaReadState({
     params: [config.owner, { programId: SOLANA_TOKEN_PROGRAM_ID }, { encoding: 'jsonParsed' }],
     fetchImpl,
     id: 2,
+    rateLimiter,
+    rateLimitPolicy,
+    sleepImpl,
   });
   if (tokens.status !== 'ok') return tokens;
-  return normalizeSolanaBalanceResponses({
-    owner: config.owner,
-    balanceBody: balance.body,
-    tokenBody: tokens.body,
-    observedAt,
-  });
+  return {
+    ...normalizeSolanaBalanceResponses({
+      owner: config.owner,
+      balanceBody: balance.body,
+      tokenBody: tokens.body,
+      observedAt,
+    }),
+    rpc_retry: {
+      getBalance: balance.retry,
+      getTokenAccountsByOwner: tokens.retry,
+    },
+  };
 }

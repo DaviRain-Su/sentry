@@ -39,6 +39,7 @@ const built = buildOkxPlaceOrderTask({
   size: '0.01',
   price: '99000',
   quoteBudget: '1000',
+  slippageBps: 50,
   clientOrderId: 'sentry-client-1',
   nowMs: 1_780_000_000_000,
   expiresAtMs: 1_780_000_120_000,
@@ -52,6 +53,8 @@ assert.equal(built.task.action.params.instId, 'BTC-USDT');
 assert.equal(built.task.action.params.tdMode, 'cash');
 assert.equal(built.task.constraints.no_withdraw, true);
 assert.deepEqual(built.task.constraints.capabilities_required, ['read', 'place_order']);
+assert.equal(built.task.constraints.max_quote_amount, '1000');
+assert.equal(built.task.constraints.slippage_bps, '50');
 assert.equal(built.task.constraints.idempotency_key, 'sentry-client-1');
 assert.equal(built.task.authorization.authorization_ref, 'okx:okx_key_trade');
 assert.equal(JSON.stringify(built).includes('secret'), false);

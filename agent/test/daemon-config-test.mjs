@@ -28,6 +28,13 @@ try {
   );
   assert.equal(defaultConfig.policyStorePath.endsWith('/.sentry/policies.json'), true);
   assert.equal(defaultConfig.activityLogPath.endsWith('/.sentry/activity.jsonl'), true);
+  assert.equal(
+    defaultConfig.commandResultStorePath.endsWith('/.sentry/command-results.json'),
+    true
+  );
+  assert.equal(defaultConfig.identityStorePath.endsWith('/.sentry/identity.json'), true);
+  assert.equal(defaultConfig.relayTokenExpiresAt, null);
+  assert.equal(defaultConfig.relayRefreshMarginMs, 120000);
   assert.equal(defaultConfig.policyLoop.enabled, false);
   assert.equal(defaultConfig.policyLoop.dispatch, false);
   assert.equal(defaultConfig.policyLoop.markTicks, true);
@@ -36,6 +43,8 @@ try {
   const explicitPath = path.join(dir, 'custom-hl-nonces.json');
   const explicitPolicyStorePath = path.join(dir, 'custom-policies.json');
   const explicitActivityLogPath = path.join(dir, 'custom-activity.jsonl');
+  const explicitCommandResultStorePath = path.join(dir, 'custom-command-results.json');
+  const explicitIdentityStorePath = path.join(dir, 'custom-identity.json');
   const { stdout: explicitOut } = await execFileAsync(
     process.execPath,
     [
@@ -47,6 +56,16 @@ try {
       explicitPolicyStorePath,
       '--activity-log',
       explicitActivityLogPath,
+      '--command-result-store',
+      explicitCommandResultStorePath,
+      '--identity-store',
+      explicitIdentityStorePath,
+      '--relay-token',
+      'rt_config_secret',
+      '--relay-token-expires-at',
+      '2026-06-04T00:15:00.000Z',
+      '--relay-refresh-margin-ms',
+      '15000',
       '--policy-loop',
       '--policy-loop-interval-ms',
       '1500',
@@ -64,6 +83,11 @@ try {
   assert.equal(explicitConfig.hyperliquidNonceStorePath, explicitPath);
   assert.equal(explicitConfig.policyStorePath, explicitPolicyStorePath);
   assert.equal(explicitConfig.activityLogPath, explicitActivityLogPath);
+  assert.equal(explicitConfig.commandResultStorePath, explicitCommandResultStorePath);
+  assert.equal(explicitConfig.identityStorePath, explicitIdentityStorePath);
+  assert.equal(explicitConfig.relayToken, 'rt_con...cret');
+  assert.equal(explicitConfig.relayTokenExpiresAt, '2026-06-04T00:15:00.000Z');
+  assert.equal(explicitConfig.relayRefreshMarginMs, 15000);
   assert.equal(explicitConfig.policyLoop.enabled, true);
   assert.equal(explicitConfig.policyLoop.intervalMs, 1500);
   assert.equal(explicitConfig.policyLoop.checkReadiness, true);

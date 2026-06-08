@@ -36,6 +36,9 @@ export async function buildLiveInventorySnapshot(options = {}) {
     keychain = {},
     okxCcy,
     simulated = false,
+    rateLimiter = null,
+    rateLimitPolicy = {},
+    sleepImpl,
   } = options;
   const base = buildLocalInventorySnapshot({
     secretStore,
@@ -73,6 +76,9 @@ export async function buildLiveInventorySnapshot(options = {}) {
           fetchImpl,
           now,
           simulated,
+          rateLimiter,
+          rateLimitPolicy,
+          sleepImpl,
         });
         if (balance.status === 'ok') {
           const okxPositions = okxBalancesToPositions(balance);
@@ -112,6 +118,9 @@ export async function buildLiveInventorySnapshot(options = {}) {
         env,
         fetchImpl,
         now,
+        rateLimiter,
+        rateLimitPolicy,
+        sleepImpl,
       });
       if (readState.status === 'ok') {
         positions.push(...readState.positions);
@@ -142,7 +151,14 @@ export async function buildLiveInventorySnapshot(options = {}) {
   }
 
   if (wantsVenue(scope, 'solana-mainnet')) {
-    const solana = await fetchSolanaReadState({ env, fetchImpl, now });
+    const solana = await fetchSolanaReadState({
+      env,
+      fetchImpl,
+      now,
+      rateLimiter,
+      rateLimitPolicy,
+      sleepImpl,
+    });
     if (solana.status === 'ok') {
       positions.push(...solana.positions);
       liveReads.push({
@@ -151,6 +167,7 @@ export async function buildLiveInventorySnapshot(options = {}) {
         position_count: solana.positions.length,
         observed_at: solana.observed_at,
         account_ref: solana.account_ref,
+        rpc_retry: solana.rpc_retry,
       });
     } else {
       accessIssues.push({
@@ -159,18 +176,27 @@ export async function buildLiveInventorySnapshot(options = {}) {
         severity: 'blocked',
         message: solana.message,
         http_status: solana.http_status,
+        retry: solana.retry,
       });
       liveReads.push({
         venue_id: 'solana-mainnet',
         status: 'error',
         code: solana.code,
         message: solana.message,
+        retry: solana.retry,
       });
     }
   }
 
   if (wantsVenue(scope, 'ethereum-mainnet')) {
-    const ethereum = await fetchEthereumReadState({ env, fetchImpl, now });
+    const ethereum = await fetchEthereumReadState({
+      env,
+      fetchImpl,
+      now,
+      rateLimiter,
+      rateLimitPolicy,
+      sleepImpl,
+    });
     if (ethereum.status === 'ok') {
       positions.push(...ethereum.positions);
       liveReads.push({
@@ -179,6 +205,7 @@ export async function buildLiveInventorySnapshot(options = {}) {
         position_count: ethereum.positions.length,
         observed_at: ethereum.observed_at,
         account_ref: ethereum.account_ref,
+        rpc_retry: ethereum.rpc_retry,
       });
     } else {
       accessIssues.push({
@@ -187,12 +214,14 @@ export async function buildLiveInventorySnapshot(options = {}) {
         severity: 'blocked',
         message: ethereum.message,
         http_status: ethereum.http_status,
+        retry: ethereum.retry,
       });
       liveReads.push({
         venue_id: 'ethereum-mainnet',
         status: 'error',
         code: ethereum.code,
         message: ethereum.message,
+        retry: ethereum.retry,
       });
     }
   }

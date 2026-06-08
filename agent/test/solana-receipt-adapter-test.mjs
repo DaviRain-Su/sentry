@@ -97,7 +97,52 @@ const fetched = await fetchSolanaTransactionReceipt({
 });
 assert.equal(fetched.status, 'ok');
 assert.equal(fetched.terminal, false);
+assert.equal(fetched.retry.attempts, 1);
 assert.deepEqual(capturedBody, request.body);
+
+let retryCalls = 0;
+const retrySleeps = [];
+const retryFetched = await fetchSolanaTransactionReceipt({
+  task: built.task,
+  result,
+  now: new Date(timestamp),
+  env: { SENTRY_SOLANA_RPC_URL: 'https://solana.invalid' },
+  rateLimitPolicy: { max_attempts: 2, base_backoff_ms: 6, max_backoff_ms: 6 },
+  sleepImpl: async (ms) => retrySleeps.push(ms),
+  fetchImpl: async () => {
+    retryCalls += 1;
+    if (retryCalls === 1) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { error: { code: -32005, message: 'node is unhealthy' } };
+        },
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          result: {
+            value: [
+              {
+                slot: 123457,
+                confirmations: null,
+                err: null,
+                confirmationStatus: 'finalized',
+              },
+            ],
+          },
+        };
+      },
+    };
+  },
+});
+assert.equal(retryFetched.status, 'ok');
+assert.equal(retryFetched.retry.retry_count, 1);
+assert.deepEqual(retrySleeps, [6]);
 
 const notFound = normalizeSolanaSignatureStatusResponse(
   {
@@ -130,6 +175,7 @@ const rpcError = await fetchSolanaTransactionReceipt({
   task: built.task,
   result,
   env: { SENTRY_SOLANA_RPC_URL: 'https://solana.invalid' },
+  rateLimitPolicy: { max_attempts: 1 },
   fetchImpl: async () => ({
     ok: true,
     status: 200,
@@ -140,5 +186,6 @@ const rpcError = await fetchSolanaTransactionReceipt({
 });
 assert.equal(rpcError.status, 'error');
 assert.equal(rpcError.code, 'SOLANA_RPC_ERROR');
+assert.equal(rpcError.retry.retry_exhausted, true);
 
 console.log('ALL SOLANA RECEIPT ADAPTER TESTS PASS');

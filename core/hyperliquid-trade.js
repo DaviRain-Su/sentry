@@ -63,6 +63,12 @@ function numericString(value) {
   return Number(text) > 0 ? text : null;
 }
 
+function nonNegativeNumericString(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const text = String(value);
+  return Number(text) >= 0 ? text : null;
+}
+
 function stringValue(value) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
@@ -343,7 +349,14 @@ export function buildHyperliquidPlaceOrderTask(input = {}) {
   const price = numericString(input.price || input.limitPx || input.limit_px);
   const tif = normalizeTif(input.tif || input.timeInForce || input.time_in_force);
   const maxNotionalUsd = numericString(
-    input.maxNotionalUsd || input.max_notional_usd || input.quoteBudget || input.quote_budget
+    input.maxNotionalUsd ||
+      input.max_notional_usd ||
+      input.quoteBudget ||
+      input.quote_budget ||
+      input.max_quote_amount
+  );
+  const slippageBps = nonNegativeNumericString(
+    input.slippageBps || input.slippage_bps || input.max_slippage_bps
   );
   const clientOrderId =
     input.cloid ||
@@ -396,6 +409,7 @@ export function buildHyperliquidPlaceOrderTask(input = {}) {
         venue_scope: ['hyperliquid'],
         capabilities_required: ['read', 'place_order'],
         max_notional_usd: maxNotionalUsd,
+        slippage_bps: slippageBps,
         idempotency_key: clientOrderId,
         require_receipt: true,
         no_withdraw: true,

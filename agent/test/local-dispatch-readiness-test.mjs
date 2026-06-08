@@ -4,6 +4,7 @@ import { buildEthereumSwapTask } from '../../core/ethereum-trade.js';
 import { buildHyperliquidPlaceOrderTask } from '../../core/hyperliquid-trade.js';
 import { buildOkxPlaceOrderTask } from '../../core/okx-trade.js';
 import { buildSolanaSwapTask } from '../../core/solana-trade.js';
+import { buildWalletReferenceSnapshot } from '../../core/wallet-refs.js';
 import { getLocalDispatchReadiness } from '../src/local-dispatch-readiness.mjs';
 
 const keyRecord = {
@@ -12,7 +13,10 @@ const keyRecord = {
   account_ref: 'okx:subaccount:ready',
   permissions: ['read', 'place_order', 'cancel_order'],
   ip_allowlist: true,
+  rotated_at: '2026-06-01T00:00:00.000Z',
+  rotation_days: 3650,
 };
+const okxProofTimestamp = '2026-06-03T00:00:00.000Z';
 const secretStore = buildLocalSecretStoreSnapshot([keyRecord]);
 const built = buildOkxPlaceOrderTask({
   taskId: 'task_okx_ready_1',
@@ -45,7 +49,67 @@ assert.equal(ready.status, 'ok');
 assert.deepEqual(ready.ready_venue_ids, ['okx']);
 assert.equal(ready.dispatch_ready_source, 'local_daemon');
 assert.equal(ready.credential_resolution.source, 'env');
+assert.equal(ready.operational_proof.rotation_proof.status, 'fresh');
 assert.equal(JSON.stringify(ready).includes('test-secret'), false);
+
+let okxLiveReadUrl = null;
+let okxLiveReadHeaders = null;
+const readyWithLiveRead = await getLocalDispatchReadiness({
+  task: built.task,
+  secretStore,
+  env: {
+    SENTRY_OKX_OKX_KEY_READY_API_KEY: 'test-key',
+    SENTRY_OKX_OKX_KEY_READY_SECRET_KEY: 'test-secret',
+    SENTRY_OKX_OKX_KEY_READY_PASSPHRASE: 'test-passphrase',
+  },
+  verifyOkxLiveRead: true,
+  now: new Date(okxProofTimestamp),
+  fetchImpl: async (url, init) => {
+    okxLiveReadUrl = url;
+    okxLiveReadHeaders = init.headers;
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          code: '0',
+          msg: '',
+          data: [{ totalEq: '100', details: [] }],
+        };
+      },
+    };
+  },
+});
+assert.equal(readyWithLiveRead.status, 'ok');
+assert.equal(readyWithLiveRead.live_read_proof.status, 'ok');
+assert.equal(readyWithLiveRead.live_read_proof.proof_source, 'okx_account_balance');
+assert.equal(readyWithLiveRead.live_read_proof.request_path, '/api/v5/account/balance');
+assert.equal(okxLiveReadUrl, 'https://www.okx.com/api/v5/account/balance');
+assert.equal(okxLiveReadHeaders['OK-ACCESS-KEY'], 'test-key');
+assert.equal(JSON.stringify(readyWithLiveRead).includes('test-secret'), false);
+
+const rejectedLiveRead = await getLocalDispatchReadiness({
+  task: built.task,
+  secretStore,
+  env: {
+    SENTRY_OKX_OKX_KEY_READY_API_KEY: 'test-key',
+    SENTRY_OKX_OKX_KEY_READY_SECRET_KEY: 'test-secret',
+    SENTRY_OKX_OKX_KEY_READY_PASSPHRASE: 'test-passphrase',
+  },
+  verifyOkxLiveRead: true,
+  fetchImpl: async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { code: '50113', msg: 'Invalid signature' };
+    },
+  }),
+});
+assert.equal(rejectedLiveRead.status, 'error');
+assert.equal(rejectedLiveRead.code, 'OKX_LIVE_READ_REJECTED');
+assert.equal(rejectedLiveRead.local_decision, 'blocked_before_dispatch');
+assert.equal(rejectedLiveRead.live_read_proof.okx_code, '50113');
+assert.equal(JSON.stringify(rejectedLiveRead).includes('test-secret'), false);
 
 const noIpAllowlist = await getLocalDispatchReadiness({
   task: built.task,
@@ -59,6 +123,18 @@ const noIpAllowlist = await getLocalDispatchReadiness({
 assert.equal(noIpAllowlist.status, 'error');
 assert.equal(noIpAllowlist.code, 'IP_ALLOWLIST_REQUIRED');
 assert.equal(noIpAllowlist.local_decision, 'blocked_before_dispatch');
+
+const expiredOkxRotation = await getLocalDispatchReadiness({
+  task: built.task,
+  secretStore: buildLocalSecretStoreSnapshot([
+    { ...keyRecord, rotated_at: '2026-05-01T00:00:00.000Z', rotation_days: 1 },
+  ]),
+  now: new Date(okxProofTimestamp),
+});
+assert.equal(expiredOkxRotation.status, 'error');
+assert.equal(expiredOkxRotation.code, 'KEY_ROTATION_EXPIRED');
+assert.equal(expiredOkxRotation.local_decision, 'blocked_before_dispatch');
+assert.equal(expiredOkxRotation.operational_proof.rotation_proof.status, 'expired');
 
 const missingCredentials = await getLocalDispatchReadiness({
   task: built.task,
@@ -76,6 +152,26 @@ const missingKey = await getLocalDispatchReadiness({
 });
 assert.equal(missingKey.status, 'error');
 assert.equal(missingKey.code, 'OKX_KEY_METADATA_REQUIRED');
+
+const revokedOkxKey = await getLocalDispatchReadiness({
+  task: built.task,
+  secretStore: buildLocalSecretStoreSnapshot([
+    {
+      ...keyRecord,
+      status: 'revoked',
+      revoked_at: '2026-06-04T00:00:00.000Z',
+      permissions: ['read'],
+    },
+  ]),
+  env: {
+    SENTRY_OKX_OKX_KEY_READY_API_KEY: 'test-key',
+    SENTRY_OKX_OKX_KEY_READY_SECRET_KEY: 'test-secret',
+    SENTRY_OKX_OKX_KEY_READY_PASSPHRASE: 'test-passphrase',
+  },
+});
+assert.equal(revokedOkxKey.status, 'error');
+assert.equal(revokedOkxKey.code, 'KEY_NOT_LINKED');
+assert.equal(revokedOkxKey.local_decision, 'blocked_before_dispatch');
 
 const ambiguousKey = await getLocalDispatchReadiness({
   task: {
@@ -111,6 +207,8 @@ const hyperliquidKey = {
     permissions: ['read', 'place_order', 'cancel_order', 'set_leverage'],
   },
   permissions: ['read', 'place_order', 'cancel_order', 'set_leverage'],
+  rotated_at: '2026-06-01T00:00:00.000Z',
+  rotation_days: 3650,
 };
 const hyperliquidStore = buildLocalSecretStoreSnapshot([hyperliquidKey]);
 const hyperliquidBuilt = buildHyperliquidPlaceOrderTask({
@@ -136,7 +234,21 @@ assert.equal(hyperliquidReady.dispatch_ready_source, 'local_daemon');
 assert.equal(hyperliquidReady.read_account_address, hyperliquidUser);
 assert.equal(hyperliquidReady.agent_wallet_address, '0x1111111111111111111111111111111111111111');
 assert.equal(hyperliquidReady.agent_wallet_grant.status, 'ok');
+assert.equal(hyperliquidReady.operational_proof.rotation_proof.status, 'fresh');
 assert.equal(JSON.stringify(hyperliquidReady).includes('private_key'), false);
+
+const hyperliquidExpiredRotation = await getLocalDispatchReadiness({
+  task: hyperliquidBuilt.task,
+  secretStore: buildLocalSecretStoreSnapshot([
+    { ...hyperliquidKey, rotated_at: '2026-05-01T00:00:00.000Z', rotation_days: 1 },
+  ]),
+  env: {},
+  now: new Date('2026-06-03T00:00:00.000Z'),
+});
+assert.equal(hyperliquidExpiredRotation.status, 'error');
+assert.equal(hyperliquidExpiredRotation.code, 'KEY_ROTATION_EXPIRED');
+assert.equal(hyperliquidExpiredRotation.local_decision, 'blocked_before_dispatch');
+assert.equal(hyperliquidExpiredRotation.operational_proof.rotation_proof.status, 'expired');
 
 let hyperliquidLiveGrantBody = null;
 const hyperliquidReadyLive = await getLocalDispatchReadiness({
@@ -293,6 +405,50 @@ assert.deepEqual(solanaReady.local_account_proof.required_capabilities, [
 ]);
 assert.equal(JSON.stringify(solanaReady).includes('private_key'), false);
 
+const solanaWalletStore = buildWalletReferenceSnapshot([
+  {
+    wallet_id: 'ows_solana_ready',
+    accounts: [{ chain_id: 'solana:mainnet', address: solanaOwner }],
+    capabilities: ['read', 'sign', 'submit_tx'],
+  },
+]);
+const solanaOwsReady = await getLocalDispatchReadiness({
+  task: solanaBuilt.task,
+  walletStore: solanaWalletStore,
+  env: {},
+});
+assert.equal(solanaOwsReady.status, 'ok');
+assert.equal(solanaOwsReady.local_account_proof.source, 'ows_wallet_ref');
+assert.equal(solanaOwsReady.local_account_proof.wallet_ref.wallet_id, 'ows_solana_ready');
+assert.equal(solanaOwsReady.local_account_proof.wallet_ref.signing_handoff, 'external_agent_ows');
+assert.equal(JSON.stringify(solanaOwsReady).includes('token'), false);
+
+const solanaOwsSignerBlocked = await getLocalDispatchReadiness({
+  task: solanaBuilt.task,
+  walletStore: solanaWalletStore,
+  requireSignerProbe: true,
+  env: {},
+});
+assert.equal(solanaOwsSignerBlocked.status, 'error');
+assert.equal(solanaOwsSignerBlocked.code, 'SOLANA_SIGNER_PROBE_NOT_CONFIGURED');
+assert.equal(solanaOwsSignerBlocked.wallet_ref.wallet_id, 'ows_solana_ready');
+
+const solanaRevokedWalletBlocked = await getLocalDispatchReadiness({
+  task: solanaBuilt.task,
+  walletStore: buildWalletReferenceSnapshot([
+    {
+      wallet_id: 'ows_solana_ready',
+      status: 'revoked',
+      accounts: [{ chain_id: 'solana:mainnet', address: solanaOwner, capabilities: ['read'] }],
+      capabilities: ['read'],
+    },
+  ]),
+  env: {},
+});
+assert.equal(solanaRevokedWalletBlocked.status, 'error');
+assert.equal(solanaRevokedWalletBlocked.code, 'SOLANA_OWS_WALLET_NOT_LINKED');
+assert.equal(solanaRevokedWalletBlocked.local_decision, 'blocked_before_dispatch');
+
 const solanaRequireSignerBlocked = await getLocalDispatchReadiness({
   task: solanaBuilt.task,
   requireSignerProbe: true,
@@ -371,6 +527,50 @@ assert.deepEqual(ethereumReady.local_account_proof.required_capabilities, [
   'submit_tx',
 ]);
 assert.equal(JSON.stringify(ethereumReady).includes('private_key'), false);
+
+const ethereumWalletStore = buildWalletReferenceSnapshot([
+  {
+    wallet_id: 'ows_ethereum_ready',
+    accounts: [{ chain_id: 'eip155:1', address: ethereumAccount }],
+    capabilities: ['read', 'sign', 'submit_tx'],
+  },
+]);
+const ethereumOwsReady = await getLocalDispatchReadiness({
+  task: ethereumBuilt.task,
+  walletStore: ethereumWalletStore,
+  env: {},
+});
+assert.equal(ethereumOwsReady.status, 'ok');
+assert.equal(ethereumOwsReady.local_account_proof.source, 'ows_wallet_ref');
+assert.equal(ethereumOwsReady.local_account_proof.wallet_ref.wallet_id, 'ows_ethereum_ready');
+assert.equal(ethereumOwsReady.local_account_proof.wallet_ref.signing_handoff, 'external_agent_ows');
+assert.equal(JSON.stringify(ethereumOwsReady).includes('token'), false);
+
+const ethereumOwsSignerBlocked = await getLocalDispatchReadiness({
+  task: ethereumBuilt.task,
+  walletStore: ethereumWalletStore,
+  requireSignerProbe: true,
+  env: {},
+});
+assert.equal(ethereumOwsSignerBlocked.status, 'error');
+assert.equal(ethereumOwsSignerBlocked.code, 'ETHEREUM_SIGNER_PROBE_NOT_CONFIGURED');
+assert.equal(ethereumOwsSignerBlocked.wallet_ref.wallet_id, 'ows_ethereum_ready');
+
+const ethereumRevokedWalletBlocked = await getLocalDispatchReadiness({
+  task: ethereumBuilt.task,
+  walletStore: buildWalletReferenceSnapshot([
+    {
+      wallet_id: 'ows_ethereum_ready',
+      status: 'revoked',
+      accounts: [{ chain_id: 'eip155:1', address: ethereumAccount, capabilities: ['read'] }],
+      capabilities: ['read'],
+    },
+  ]),
+  env: {},
+});
+assert.equal(ethereumRevokedWalletBlocked.status, 'error');
+assert.equal(ethereumRevokedWalletBlocked.code, 'ETHEREUM_OWS_WALLET_NOT_LINKED');
+assert.equal(ethereumRevokedWalletBlocked.local_decision, 'blocked_before_dispatch');
 
 const ethereumRequireSignerBlocked = await getLocalDispatchReadiness({
   task: ethereumBuilt.task,

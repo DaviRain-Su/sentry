@@ -3,6 +3,7 @@ export const SOLANA_VENUE_ID = 'solana-mainnet';
 export const SOLANA_SWAP_ADAPTERS = ['jupiter', 'raydium', 'orca', 'custom'];
 export const SOLANA_SIGNATURE_RE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 export const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+export const SOLANA_UNSIGNED_TRANSACTION_FORMAT = 'solana_unsigned_transaction_base64';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -17,6 +18,13 @@ function numericString(value) {
   if (value === undefined || value === null || value === '') return null;
   const text = String(value);
   return Number(text) > 0 ? text : null;
+}
+
+function positiveNumericString(value) {
+  const text = stringValue(value);
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) && number > 0 ? text : null;
 }
 
 function normalizeAdapter(value) {
@@ -55,6 +63,64 @@ function solanaSignatureFromResult(result = {}) {
       evidence.tx_signature ||
       evidence.tx_digest
   );
+}
+
+function arrayStrings(value) {
+  return Array.isArray(value) ? value.map((item) => stringValue(item)).filter(Boolean) : [];
+}
+
+function solanaPreparedTransactionEvidence(result = {}) {
+  const evidence = isObject(result.evidence) ? result.evidence : {};
+  const prepared = isObject(evidence.prepared_transaction) ? evidence.prepared_transaction : {};
+  return {
+    evidence,
+    prepared,
+    unsignedTransactionBase64: stringValue(
+      evidence.unsigned_transaction_base64 ||
+        evidence.transaction_base64 ||
+        evidence.swap_transaction_base64 ||
+        prepared.unsigned_transaction_base64 ||
+        prepared.transaction_base64 ||
+        prepared.swap_transaction_base64
+    ),
+    requiredSigners: [
+      ...arrayStrings(evidence.required_signers),
+      ...arrayStrings(prepared.required_signers),
+      stringValue(evidence.required_signer || prepared.required_signer),
+      stringValue(evidence.signer || prepared.signer),
+    ].filter(Boolean),
+    quoteId: stringValue(evidence.quote_id || result.quote_id || prepared.quote_id),
+    chainId: stringValue(evidence.chain_id || prepared.chain_id),
+    simulation: isObject(evidence.simulation) ? evidence.simulation : {},
+    simulationId: stringValue(evidence.simulation_id || prepared.simulation_id),
+  };
+}
+
+function isBase64Like(value) {
+  return /^[A-Za-z0-9+/=_-]{32,}$/.test(stringValue(value));
+}
+
+function simulationStatus(value = {}) {
+  return stringValue(
+    value.evidence.simulation_status ||
+      value.simulation.status ||
+      value.simulation.result ||
+      value.prepared.simulation_status
+  ).toLowerCase();
+}
+
+function simulationError(value = {}) {
+  return (
+    value.evidence.err ||
+    value.evidence.error ||
+    value.simulation.err ||
+    value.simulation.error ||
+    null
+  );
+}
+
+function simulationSucceeded(status) {
+  return ['ok', 'success', 'succeeded', 'passed', 'simulated'].includes(status);
 }
 
 export function isSolanaSignature(value) {
@@ -204,6 +270,13 @@ export function buildSolanaSwapTask(input = {}) {
     `solana-${adapter || 'swap'}-${String(input.taskId || input.task_id || Date.now()).slice(-18)}`;
   const maxInputAmount = numericString(input.maxInputAmount || input.max_input_amount || amount);
   const minOutputAmount = numericString(input.minOutputAmount || input.min_output_amount);
+  const maxNotionalUsd = positiveNumericString(
+    input.maxNotionalUsd ||
+      input.max_notional_usd ||
+      input.max_quote_amount ||
+      input.quoteBudget ||
+      input.quote_budget
+  );
 
   const params = {
     owner: scope.owner,
@@ -247,7 +320,15 @@ export function buildSolanaSwapTask(input = {}) {
           amount,
           slippageBps,
           quote_id: quoteId,
-          transaction_format: 'external_agent_built',
+          transaction_format: SOLANA_UNSIGNED_TRANSACTION_FORMAT,
+          signing_handoff:
+            input.signingHandoff || input.signing_handoff || 'external_agent_ows_or_wallet',
+          prepared_result_required: true,
+          prepared_transaction_schema: {
+            unsigned_transaction_base64: true,
+            required_signers: [scope.owner],
+            simulation_required: true,
+          },
           simulated: Boolean(input.simulated),
         },
       },
@@ -257,6 +338,9 @@ export function buildSolanaSwapTask(input = {}) {
         idempotency_key: quoteId,
         require_receipt: true,
         require_simulation: true,
+        require_prepared_transaction: true,
+        require_quote_id: true,
+        max_notional_usd: maxNotionalUsd,
         max_input_amount: maxInputAmount,
         min_output_amount: minOutputAmount,
         slippage_bps: slippageBps,
@@ -309,6 +393,16 @@ export function validateSolanaSwapTask(task = {}) {
     ),
   });
   if (swapParams.status !== 'ok') return swapParams;
+  if (
+    params.transaction_format &&
+    params.transaction_format !== SOLANA_UNSIGNED_TRANSACTION_FORMAT
+  ) {
+    return {
+      status: 'error',
+      code: 'SOLANA_TRANSACTION_FORMAT_INVALID',
+      message: `Solana submit_tx task requires transaction_format=${SOLANA_UNSIGNED_TRANSACTION_FORMAT}.`,
+    };
+  }
   return { status: 'ok' };
 }
 
@@ -361,6 +455,9 @@ export function verifySolanaAgentTaskResult(result = {}, task = {}) {
     };
   }
   const evidence = isObject(result.evidence) ? result.evidence : {};
+  if (result.status === 'proposed') {
+    return verifySolanaPreparedTransactionResult(result, task);
+  }
   const signature = solanaSignatureFromResult(result);
   if (['submitted', 'done'].includes(result.status) && !isSolanaSignature(signature)) {
     return {
@@ -396,4 +493,103 @@ export function verifySolanaAgentTaskResult(result = {}, task = {}) {
     };
   }
   return { status: 'ok' };
+}
+
+export function verifySolanaPreparedTransactionResult(result = {}, task = {}) {
+  const taskCheck = validateSolanaSwapTask(task);
+  if (taskCheck.status !== 'ok') return taskCheck;
+  const prepared = solanaPreparedTransactionEvidence(result);
+  if (prepared.evidence.venue_id && prepared.evidence.venue_id !== SOLANA_VENUE_ID) {
+    return {
+      status: 'error',
+      code: 'SOLANA_RESULT_VENUE_MISMATCH',
+      message: 'Solana prepared transaction evidence must have venue_id=solana-mainnet.',
+    };
+  }
+  if (prepared.chainId && prepared.chainId !== SOLANA_CHAIN_ID) {
+    return {
+      status: 'error',
+      code: 'SOLANA_RESULT_CHAIN_MISMATCH',
+      message: 'Solana prepared transaction evidence must have chain_id=solana:mainnet.',
+    };
+  }
+  const expectedQuoteId = solanaQuoteIdFromTask(task);
+  if (!prepared.quoteId) {
+    return {
+      status: 'error',
+      code: 'SOLANA_QUOTE_ID_REQUIRED',
+      message: 'Solana proposed transaction requires quote_id evidence.',
+    };
+  }
+  if (expectedQuoteId && prepared.quoteId !== expectedQuoteId) {
+    return {
+      status: 'error',
+      code: 'SOLANA_QUOTE_ID_MISMATCH',
+      message: 'Solana prepared transaction quote_id does not match the dispatched task.',
+      expected_quote_id: expectedQuoteId,
+      actual_quote_id: prepared.quoteId,
+    };
+  }
+  if (!isBase64Like(prepared.unsignedTransactionBase64)) {
+    return {
+      status: 'error',
+      code: 'SOLANA_UNSIGNED_TRANSACTION_REQUIRED',
+      message: 'Solana proposed transaction requires unsigned_transaction_base64 evidence.',
+    };
+  }
+  const owner = solanaOwnerFromTask(task);
+  if (!prepared.requiredSigners.length) {
+    return {
+      status: 'error',
+      code: 'SOLANA_REQUIRED_SIGNER_REQUIRED',
+      message: 'Solana proposed transaction must declare required_signers.',
+    };
+  }
+  if (!prepared.requiredSigners.includes(owner)) {
+    return {
+      status: 'error',
+      code: 'SOLANA_REQUIRED_SIGNER_MISMATCH',
+      message: 'Solana proposed transaction required_signers must include the task owner wallet.',
+      expected_signer: owner,
+      actual_signers: prepared.requiredSigners,
+    };
+  }
+  const simErr = simulationError(prepared);
+  if (simErr) {
+    return {
+      status: 'error',
+      code: 'SOLANA_SIMULATION_FAILED',
+      message: 'Solana proposed transaction simulation returned an error.',
+      simulation_error: simErr,
+    };
+  }
+  const simStatus = simulationStatus(prepared);
+  if (!prepared.simulationId && !simStatus) {
+    return {
+      status: 'error',
+      code: 'SOLANA_SIMULATION_EVIDENCE_REQUIRED',
+      message:
+        'Solana proposed transaction requires simulation_id or successful simulation status.',
+    };
+  }
+  if (simStatus && !simulationSucceeded(simStatus)) {
+    return {
+      status: 'error',
+      code: 'SOLANA_SIMULATION_FAILED',
+      message: 'Solana proposed transaction simulation status is not successful.',
+      simulation_status: simStatus,
+    };
+  }
+  return {
+    status: 'ok',
+    prepared_transaction: {
+      venue_id: SOLANA_VENUE_ID,
+      chain_id: SOLANA_CHAIN_ID,
+      quote_id: prepared.quoteId,
+      required_signers: prepared.requiredSigners,
+      transaction_format: SOLANA_UNSIGNED_TRANSACTION_FORMAT,
+      simulation_id: prepared.simulationId || null,
+      simulation_status: simStatus || null,
+    },
+  };
 }

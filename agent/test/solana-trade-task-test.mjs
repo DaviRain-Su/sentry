@@ -6,6 +6,7 @@ import {
   normalizeSolanaExecutionResult,
   validateSolanaSwapTask,
   verifySolanaAgentTaskResult,
+  verifySolanaPreparedTransactionResult,
 } from '../../core/solana-trade.js';
 
 const owner = '11111111111111111111111111111111';
@@ -40,6 +41,7 @@ const built = buildSolanaSwapTask({
   amount: '1000000',
   slippageBps: 50,
   quoteId: 'quote_solana_1',
+  maxNotionalUsd: '1000',
   maxInputAmount: '1000000',
   minOutputAmount: '990000',
   nowMs: 1_780_000_000_000,
@@ -52,7 +54,11 @@ assert.equal(built.task.target_agent, 'codex');
 assert.equal(built.task.action.type, 'submit_tx');
 assert.equal(built.task.action.params.intent, 'swap');
 assert.equal(built.task.action.params.adapter, 'jupiter');
+assert.equal(built.task.action.params.transaction_format, 'solana_unsigned_transaction_base64');
+assert.equal(built.task.action.params.prepared_result_required, true);
 assert.equal(built.task.constraints.idempotency_key, 'quote_solana_1');
+assert.equal(built.task.constraints.max_notional_usd, '1000');
+assert.equal(built.task.constraints.require_prepared_transaction, true);
 assert.deepEqual(built.task.constraints.capabilities_required, ['read', 'sign', 'submit_tx']);
 assert.equal(built.task.constraints.no_withdraw, true);
 assert.equal(built.task.authorization.authorization_model, 'native_delegation');
@@ -104,6 +110,63 @@ assert.equal(normalized.status, 'submitted');
 assert.equal(normalized.evidence.signature, signature);
 assert.equal(normalized.evidence.slot, 123456);
 assert.equal(verifySolanaAgentTaskResult(normalized, built.task).status, 'ok');
+
+const prepared = {
+  task_id: built.task.task_id,
+  status: 'proposed',
+  evidence: {
+    venue_id: 'solana-mainnet',
+    chain_id: 'solana:mainnet',
+    quote_id: 'quote_solana_1',
+    unsigned_transaction_base64: 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==',
+    required_signers: [owner],
+    simulation: {
+      status: 'ok',
+      units_consumed: 12345,
+    },
+  },
+};
+assert.equal(verifySolanaPreparedTransactionResult(prepared, built.task).status, 'ok');
+assert.equal(verifySolanaAgentTaskResult(prepared, built.task).status, 'ok');
+assert.equal(
+  verifySolanaPreparedTransactionResult(
+    {
+      ...prepared,
+      evidence: {
+        ...prepared.evidence,
+        required_signers: ['22222222222222222222222222222222'],
+      },
+    },
+    built.task
+  ).code,
+  'SOLANA_REQUIRED_SIGNER_MISMATCH'
+);
+assert.equal(
+  verifySolanaPreparedTransactionResult(
+    {
+      ...prepared,
+      evidence: {
+        ...prepared.evidence,
+        simulation: { status: 'failed', err: 'insufficient funds' },
+      },
+    },
+    built.task
+  ).code,
+  'SOLANA_SIMULATION_FAILED'
+);
+assert.equal(
+  verifySolanaPreparedTransactionResult(
+    {
+      ...prepared,
+      evidence: {
+        ...prepared.evidence,
+        unsigned_transaction_base64: '',
+      },
+    },
+    built.task
+  ).code,
+  'SOLANA_UNSIGNED_TRANSACTION_REQUIRED'
+);
 
 assert.equal(
   normalizeSolanaExecutionResult({

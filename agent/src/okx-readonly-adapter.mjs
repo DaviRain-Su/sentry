@@ -218,3 +218,99 @@ export async function fetchOkxAccountBalance({
     ? { ...normalized, retry: okxRetrySummary(fetched) }
     : { ...normalized, retry: okxRetrySummary(fetched) };
 }
+
+export async function verifyOkxLiveReadProof({
+  credentials,
+  keyMetadata,
+  ccy,
+  fetchImpl = fetch,
+  now = new Date(),
+  simulated = false,
+  rateLimiter = null,
+  rateLimitPolicy = {},
+  sleepImpl,
+} = {}) {
+  const scope = assertOkxReadScope(keyMetadata);
+  if (scope.status !== 'ok') return scope;
+  if (!credentials || typeof credentials !== 'object') {
+    return {
+      status: 'error',
+      code: 'OKX_CREDENTIALS_REQUIRED',
+      message: 'OKX credentials must be supplied before live read proof verification.',
+    };
+  }
+
+  const request = okxBalanceRequest({ ccy, simulated });
+  const fetched = await fetchOkxJsonWithBackoff({
+    policy: rateLimitPolicy,
+    sleep: sleepImpl,
+    rateLimiter,
+    bucket: `okx-live-read-proof:${keyMetadata.key_handle || 'key'}:${request.requestPath}`,
+    fetchOnce: async () => {
+      const timestamp = (typeof now === 'function' ? now() : now).toISOString();
+      const headers = buildOkxAuthHeaders({
+        ...credentials,
+        timestamp,
+        method: request.method,
+        requestPath: request.requestPath,
+        body: request.body,
+        simulated,
+      });
+      const response = await fetchImpl(request.url, {
+        method: request.method,
+        headers,
+      });
+      const body = await response.json();
+      return { response, body, observed_at: timestamp };
+    },
+  });
+
+  if (fetched.error) {
+    return {
+      status: 'error',
+      code: 'OKX_LIVE_READ_NETWORK_ERROR',
+      message: fetched.error?.message || String(fetched.error),
+      retry: okxRetrySummary(fetched),
+    };
+  }
+
+  const { response, body } = fetched;
+  if (!response?.ok) {
+    return {
+      status: 'error',
+      code: response?.status === 429 ? 'OKX_RATE_LIMITED' : 'OKX_LIVE_READ_HTTP_ERROR',
+      http_status: response?.status ?? null,
+      okx_code: body?.code ?? null,
+      message: body?.msg || `OKX HTTP ${response?.status ?? 'error'}`,
+      proof_source: 'okx_account_balance',
+      request_path: request.requestPath,
+      retry: okxRetrySummary(fetched),
+    };
+  }
+
+  if (!body || body.code !== '0') {
+    return {
+      status: 'error',
+      code: 'OKX_LIVE_READ_REJECTED',
+      http_status: response.status,
+      okx_code: body?.code ?? null,
+      message: body?.msg || 'OKX rejected the signed live read proof request.',
+      proof_source: 'okx_account_balance',
+      request_path: request.requestPath,
+      retry: okxRetrySummary(fetched),
+    };
+  }
+
+  return {
+    status: 'ok',
+    venue_id: 'okx',
+    key_handle: keyMetadata.key_handle,
+    account_ref: keyMetadata.account_ref,
+    proof_source: 'okx_account_balance',
+    request_path: request.requestPath,
+    http_status: response.status,
+    okx_code: body.code,
+    observed_at: fetched.observed_at,
+    retry: okxRetrySummary(fetched),
+  };
+}

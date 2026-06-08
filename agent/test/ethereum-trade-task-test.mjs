@@ -6,6 +6,7 @@ import {
   normalizeEthereumExecutionResult,
   validateEthereumSwapTask,
   verifyEthereumAgentTaskResult,
+  verifyEthereumPreparedTransactionResult,
 } from '../../core/ethereum-trade.js';
 
 const accountRef = '0x0000000000000000000000000000000000000001';
@@ -39,6 +40,7 @@ const built = buildEthereumSwapTask({
   amount: '1000000',
   slippageBps: 50,
   quoteId: 'quote_ethereum_1',
+  maxNotionalUsd: '1000',
   maxInputAmount: '1000000',
   minOutputAmount: '990000',
   nowMs: 1_780_000_000_000,
@@ -51,7 +53,11 @@ assert.equal(built.task.target_agent, 'codex');
 assert.equal(built.task.action.type, 'submit_tx');
 assert.equal(built.task.action.params.intent, 'swap');
 assert.equal(built.task.action.params.adapter, 'uniswap');
+assert.equal(built.task.action.params.transaction_format, 'evm_transaction_request');
+assert.equal(built.task.action.params.prepared_result_required, true);
 assert.equal(built.task.constraints.idempotency_key, 'quote_ethereum_1');
+assert.equal(built.task.constraints.max_notional_usd, '1000');
+assert.equal(built.task.constraints.require_prepared_transaction, true);
 assert.deepEqual(built.task.constraints.capabilities_required, ['read', 'sign', 'submit_tx']);
 assert.equal(built.task.constraints.no_withdraw, true);
 assert.equal(built.task.authorization.authorization_model, 'smart_account_module');
@@ -103,6 +109,73 @@ assert.equal(normalized.status, 'done');
 assert.equal(normalized.evidence.tx_hash, txHash);
 assert.equal(normalized.evidence.block_number, '0x123');
 assert.equal(verifyEthereumAgentTaskResult(normalized, built.task).status, 'ok');
+
+const prepared = {
+  task_id: built.task.task_id,
+  status: 'proposed',
+  evidence: {
+    venue_id: 'ethereum-mainnet',
+    chain_id: 'eip155:1',
+    quote_id: 'quote_ethereum_1',
+    transaction_request: {
+      from: accountRef,
+      to: '0x0000000000000000000000000000000000000004',
+      data: '0x095ea7b3',
+      value: '0',
+    },
+    simulation: {
+      status: 'success',
+      gas_used: '21000',
+    },
+  },
+};
+assert.equal(verifyEthereumPreparedTransactionResult(prepared, built.task).status, 'ok');
+assert.equal(verifyEthereumAgentTaskResult(prepared, built.task).status, 'ok');
+assert.equal(
+  verifyEthereumPreparedTransactionResult(
+    {
+      ...prepared,
+      evidence: {
+        ...prepared.evidence,
+        transaction_request: {
+          ...prepared.evidence.transaction_request,
+          from: '0x0000000000000000000000000000000000000005',
+        },
+      },
+    },
+    built.task
+  ).code,
+  'ETHEREUM_FROM_ADDRESS_MISMATCH'
+);
+assert.equal(
+  verifyEthereumPreparedTransactionResult(
+    {
+      ...prepared,
+      evidence: {
+        ...prepared.evidence,
+        transaction_request: {
+          ...prepared.evidence.transaction_request,
+          data: '0x',
+        },
+      },
+    },
+    built.task
+  ).code,
+  'ETHEREUM_CALLDATA_REQUIRED'
+);
+assert.equal(
+  verifyEthereumPreparedTransactionResult(
+    {
+      ...prepared,
+      evidence: {
+        ...prepared.evidence,
+        simulation: { status: 'reverted', err: 'execution reverted' },
+      },
+    },
+    built.task
+  ).code,
+  'ETHEREUM_SIMULATION_FAILED'
+);
 
 const reverted = normalizeEthereumExecutionResult(
   {

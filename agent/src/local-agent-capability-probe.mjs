@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { parseCommandLine } from './agent-dispatcher.mjs';
+import { parseTaskCapabilityList } from './local-agent-registry.mjs';
 
 export const DEFAULT_AGENT_PROBE_TIMEOUT_MS = 3000;
 export const MAX_AGENT_PROBE_OUTPUT_BYTES = 4000;
@@ -74,6 +75,7 @@ function capabilityAssessment(agent = {}, profile = inferAgentProfile(agent)) {
     declared_capabilities: declared,
     required_capabilities: required,
     missing_capabilities: missing,
+    declared_task_capabilities: parseTaskCapabilityList(agent.task_capabilities),
   };
 }
 

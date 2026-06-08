@@ -7,6 +7,7 @@ import { fetchEthereumTransactionReceipt } from './ethereum-receipt-adapter.mjs'
 import { verifyHyperliquidLiveAgentWalletGrant } from './hyperliquid-agent-wallet-adapter.mjs';
 import { submitHyperliquidSignedExchangeAction } from './hyperliquid-exchange-submit-adapter.mjs';
 import { fetchHyperliquidOrderStatus } from './hyperliquid-order-status-adapter.mjs';
+import { submitPreparedTransactionWithSignerCommand } from './local-signer-command-handoff.mjs';
 import { redactCredentialResolution, resolveOkxCredentials } from './local-credential-resolver.mjs';
 import { fetchOkxOrderStatus } from './okx-order-status-adapter.mjs';
 import { fetchSolanaTransactionReceipt } from './solana-receipt-adapter.mjs';
@@ -68,6 +69,14 @@ function shouldSubmitHyperliquidSignedPayload(task = {}, dispatch = {}) {
   );
 }
 
+function shouldSubmitPreparedTransactionWithSigner(task = {}, dispatch = {}) {
+  return (
+    dispatch?.status === 'ok' &&
+    (isSolanaSubmitTxTask(task) || isEthereumSubmitTxTask(task)) &&
+    dispatch.agent_result?.status === 'proposed'
+  );
+}
+
 function receiptError(payload = {}) {
   return {
     status: 'error',
@@ -91,9 +100,91 @@ export async function verifyDispatchReceipt(options = {}) {
     rateLimiter = null,
     rateLimitPolicy = {},
     sleepImpl,
+    solanaSignerCommand = null,
+    ethereumSignerCommand = null,
+    signerCommand = null,
+    signerTimeoutMs = 30_000,
+    signerSpawnImpl,
   } = options;
 
   if (!shouldVerifyOkxReceipt(task, dispatch)) {
+    if (shouldSubmitPreparedTransactionWithSigner(task, dispatch)) {
+      const submitted = await submitPreparedTransactionWithSignerCommand({
+        task,
+        dispatch,
+        env,
+        now,
+        solanaSignerCommand,
+        ethereumSignerCommand,
+        signerCommand,
+        timeoutMs: signerTimeoutMs,
+        ...(signerSpawnImpl ? { spawnImpl: signerSpawnImpl } : {}),
+      });
+      if (submitted.status !== 'ok') {
+        return receiptError({
+          code: submitted.code || 'LOCAL_SIGNER_HANDOFF_FAILED',
+          message: submitted.message || 'Local signer handoff failed.',
+          dispatch,
+          receipt_verification: {
+            status: 'error',
+            venue_id: isSolanaSubmitTxTask(task) ? 'solana-mainnet' : 'ethereum-mainnet',
+            code: submitted.code || 'LOCAL_SIGNER_HANDOFF_FAILED',
+            message: submitted.message,
+            signer_handoff: {
+              status: 'error',
+              venue_id: submitted.venue_id || null,
+              code: submitted.code || 'LOCAL_SIGNER_HANDOFF_FAILED',
+              command: submitted.command || null,
+              args_count: submitted.args_count ?? null,
+              secret_material_observed: false,
+            },
+          },
+        });
+      }
+      const verified = isSolanaSubmitTxTask(task)
+        ? await verifySolanaDispatchReceipt({
+            task,
+            dispatch: submitted.dispatch,
+            env,
+            fetchImpl,
+            now,
+            rateLimiter,
+            rateLimitPolicy,
+            sleepImpl,
+          })
+        : await verifyEthereumDispatchReceipt({
+            task,
+            dispatch: submitted.dispatch,
+            env,
+            fetchImpl,
+            now,
+            rateLimiter,
+            rateLimitPolicy,
+            sleepImpl,
+          });
+      if (verified.status !== 'ok') return verified;
+      return {
+        ...verified,
+        receipt_verification: {
+          ...verified.receipt_verification,
+          signer_handoff: submitted.signer_handoff,
+        },
+        dispatch: {
+          ...verified.dispatch,
+          receipt_verification: {
+            ...verified.dispatch.receipt_verification,
+            signer_handoff: submitted.signer_handoff,
+          },
+          agent_result: {
+            ...verified.dispatch.agent_result,
+            evidence: {
+              ...verified.dispatch.agent_result.evidence,
+              signer_handoff: true,
+            },
+          },
+        },
+      };
+    }
     if (shouldSubmitHyperliquidSignedPayload(task, dispatch)) {
       const preflight = await verifyHyperliquidReceiptPreflight({
         dispatch,
@@ -194,6 +285,9 @@ export async function verifyDispatchReceipt(options = {}) {
         env,
         fetchImpl,
         now,
+        rateLimiter,
+        rateLimitPolicy,
+        sleepImpl,
       });
     }
     if (shouldVerifyEthereumReceipt(task, dispatch)) {
@@ -203,6 +297,9 @@ export async function verifyDispatchReceipt(options = {}) {
         env,
         fetchImpl,
         now,
+        rateLimiter,
+        rateLimitPolicy,
+        sleepImpl,
       });
     }
     return {
@@ -233,6 +330,7 @@ export async function verifyDispatchReceipt(options = {}) {
     venue_id: 'okx',
     required_permissions: ['read', 'place_order'],
     require_ip_allowlist: true,
+    now,
   });
   if (operationalProof.status !== 'ok') {
     return receiptError({
@@ -336,13 +434,25 @@ export async function verifyDispatchReceipt(options = {}) {
 }
 
 async function verifySolanaDispatchReceipt(options = {}) {
-  const { task, dispatch, env = process.env, fetchImpl = fetch, now = new Date() } = options;
+  const {
+    task,
+    dispatch,
+    env = process.env,
+    fetchImpl = fetch,
+    now = new Date(),
+    rateLimiter = null,
+    rateLimitPolicy = {},
+    sleepImpl,
+  } = options;
   const receipt = await fetchSolanaTransactionReceipt({
     task,
     result: dispatch.agent_result,
     env,
     fetchImpl,
     now,
+    rateLimiter,
+    rateLimitPolicy,
+    sleepImpl,
   });
   if (receipt.status !== 'ok') {
     return receiptError({
@@ -356,6 +466,7 @@ async function verifySolanaDispatchReceipt(options = {}) {
         message: receipt.message,
         http_status: receipt.http_status,
         rpc_code: receipt.rpc_code,
+        retry: receipt.retry,
       },
     });
   }
@@ -373,6 +484,7 @@ async function verifySolanaDispatchReceipt(options = {}) {
     terminal: receipt.terminal,
     observed_at: receipt.observed_at,
     idempotency_key: receipt.idempotency_key,
+    retry: receipt.retry,
   };
 
   return {
@@ -401,13 +513,25 @@ async function verifySolanaDispatchReceipt(options = {}) {
 }
 
 async function verifyEthereumDispatchReceipt(options = {}) {
-  const { task, dispatch, env = process.env, fetchImpl = fetch, now = new Date() } = options;
+  const {
+    task,
+    dispatch,
+    env = process.env,
+    fetchImpl = fetch,
+    now = new Date(),
+    rateLimiter = null,
+    rateLimitPolicy = {},
+    sleepImpl,
+  } = options;
   const receipt = await fetchEthereumTransactionReceipt({
     task,
     result: dispatch.agent_result,
     env,
     fetchImpl,
     now,
+    rateLimiter,
+    rateLimitPolicy,
+    sleepImpl,
   });
   if (receipt.status !== 'ok') {
     return receiptError({
@@ -421,6 +545,7 @@ async function verifyEthereumDispatchReceipt(options = {}) {
         message: receipt.message,
         http_status: receipt.http_status,
         rpc_code: receipt.rpc_code,
+        retry: receipt.retry,
       },
     });
   }
@@ -440,6 +565,7 @@ async function verifyEthereumDispatchReceipt(options = {}) {
     terminal: receipt.terminal,
     observed_at: receipt.observed_at,
     idempotency_key: receipt.idempotency_key,
+    retry: receipt.retry,
   };
 
   return {
@@ -498,6 +624,7 @@ async function verifyHyperliquidReceiptPreflight(options = {}) {
     venue_id: 'hyperliquid',
     required_permissions: ['read', 'place_order'],
     require_ip_allowlist: false,
+    now,
   });
   if (operationalProof.status !== 'ok') {
     return receiptError({

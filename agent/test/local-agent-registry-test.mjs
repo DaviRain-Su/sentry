@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
+  assessAgentTaskCapability,
   loadAgentRegistry,
+  parseTaskCapabilityList,
   readAgentRegistryConfig,
   resolveAgentDispatchCommand,
   removeRegisteredAgent,
@@ -29,6 +31,7 @@ try {
       display_name: 'Codex CLI',
       command: `${process.execPath} ./fake-agent.mjs`,
       capabilities: ['read_context', 'return_evidence'],
+      task_capabilities: ['okx:place_order', 'solana:swap'],
     },
     { configPath }
   );
@@ -44,19 +47,57 @@ try {
   assert.equal(loaded.agent_count, 1);
   assert.equal(loaded.enabled_count, 1);
   assert.equal(loaded.agents[0].command, `${process.execPath} ./fake-agent.mjs`);
+  assert.deepEqual(loaded.agents[0].task_capabilities, [
+    { venue_id: 'okx', action_type: 'place_order' },
+    { venue_id: 'solana-mainnet', action_type: 'submit_tx' },
+  ]);
+  assert.deepEqual(parseTaskCapabilityList('ethereum:swap,hyperliquid/place_order,*'), [
+    { venue_id: 'ethereum-mainnet', action_type: 'submit_tx' },
+    { venue_id: 'hyperliquid', action_type: 'place_order' },
+    { venue_id: '*', action_type: '*' },
+  ]);
 
   const resolved = resolveRegisteredAgentCommand(loaded, 'Codex');
   assert.equal(resolved.status, 'ok');
   assert.equal(resolved.agent_id, 'codex');
   assert.equal(resolved.command, `${process.execPath} ./fake-agent.mjs`);
+  assert.equal(resolved.task_capability.status, 'skipped');
+
+  const matchingCapability = assessAgentTaskCapability(loaded.agents[0], {
+    venue_id: 'okx',
+    action: { type: 'place_order' },
+  });
+  assert.equal(matchingCapability.status, 'ok');
+  assert.equal(matchingCapability.matched_task_capability.venue_id, 'okx');
+
+  const deniedCapability = assessAgentTaskCapability(loaded.agents[0], {
+    venue_id: 'ethereum-mainnet',
+    action: { type: 'submit_tx' },
+  });
+  assert.equal(deniedCapability.status, 'error');
+  assert.equal(deniedCapability.code, 'AGENT_TASK_CAPABILITY_DENIED');
 
   const dispatchCommand = resolveAgentDispatchCommand({
     registry: loaded,
-    payload: { target_agent: 'codex' },
+    payload: {
+      target_agent: 'codex',
+      task: { venue_id: 'okx', action: { type: 'place_order' } },
+    },
   });
   assert.equal(dispatchCommand.status, 'ok');
   assert.equal(dispatchCommand.agent_id, 'codex');
   assert.equal(dispatchCommand.unregistered_command, undefined);
+  assert.equal(dispatchCommand.task_capability.status, 'ok');
+
+  const deniedDispatchCommand = resolveAgentDispatchCommand({
+    registry: loaded,
+    payload: {
+      target_agent: 'codex',
+      task: { venue_id: 'ethereum-mainnet', action: { type: 'submit_tx' } },
+    },
+  });
+  assert.equal(deniedDispatchCommand.status, 'error');
+  assert.equal(deniedDispatchCommand.code, 'AGENT_TASK_CAPABILITY_DENIED');
 
   const missingDispatchCommand = resolveAgentDispatchCommand({
     registry: loaded,
@@ -92,6 +133,8 @@ try {
       `${process.execPath} ./claude-agent.mjs`,
       '--capabilities',
       'read_context,return_evidence',
+      '--task-capabilities',
+      'okx:place_order,hyperliquid:place_order',
       '--agent-registry',
       cliConfigPath,
       '--json',
@@ -101,6 +144,10 @@ try {
   const cliRegistered = JSON.parse(registerOut);
   assert.equal(cliRegistered.status, 'ok');
   assert.equal(cliRegistered.agent.agent_id, 'claude-code');
+  assert.deepEqual(cliRegistered.agent.task_capabilities, [
+    { venue_id: 'okx', action_type: 'place_order' },
+    { venue_id: 'hyperliquid', action_type: 'place_order' },
+  ]);
 
   const { stdout: listOut } = await execFileAsync(
     process.execPath,

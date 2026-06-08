@@ -49,6 +49,10 @@ export const DEFAULT_SECRET_HANDLES = [
 export const DEFAULT_OKX_TRADE_REQUIRED_PERMISSIONS = ['read', 'place_order'];
 export const HYPERLIQUID_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 export const DEFAULT_HYPERLIQUID_AGENT_WALLET_REQUIRED_PERMISSIONS = ['read', 'place_order'];
+export const DEFAULT_VENUE_KEY_ROTATION_DAYS = 30;
+export const DEFAULT_VENUE_KEY_ROTATION_WARNING_DAYS = 7;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function includesRawSecretField(input) {
   if (!input || typeof input !== 'object') return false;
@@ -77,6 +81,32 @@ function listValue(values) {
 function normalizeString(value) {
   if (value === undefined || value === null) return '';
   return String(value).trim();
+}
+
+function positiveNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function dateMs(value) {
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (value === undefined || value === null || value === '') return null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function isoFromMs(ms) {
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+function firstTimestamp(...values) {
+  for (const value of values) {
+    if (dateMs(value) !== null) return value;
+  }
+  return null;
 }
 
 function normalizeHyperliquidAgentWallet(input = {}, permissions = []) {
@@ -232,9 +262,76 @@ export function validateVenueKeyMetadata(input) {
               source: 'metadata_attestation',
               verified_at: null,
             },
-      rotation_days: Number(input.rotation_days || 30),
+      rotation_days: positiveNumber(
+        input.rotation_days ?? input.rotationDays,
+        DEFAULT_VENUE_KEY_ROTATION_DAYS
+      ),
+      created_at:
+        firstTimestamp(input.created_at, input.createdAt, input.rotated_at, input.rotatedAt) ||
+        null,
+      rotated_at:
+        firstTimestamp(input.rotated_at, input.rotatedAt, input.created_at, input.createdAt) ||
+        null,
+      rotation_reason: input.rotation_reason || input.rotationReason || null,
       status: input.status || 'linked',
     },
+  };
+}
+
+export function buildVenueKeyRotationProof(keyMetadata = {}, options = {}) {
+  const nowMs = dateMs(options.now) ?? Date.now();
+  const rotationDays = positiveNumber(
+    keyMetadata.rotation_days ?? keyMetadata.rotationDays,
+    DEFAULT_VENUE_KEY_ROTATION_DAYS
+  );
+  const warningDays = positiveNumber(
+    options.warning_days ?? options.warningDays,
+    DEFAULT_VENUE_KEY_ROTATION_WARNING_DAYS
+  );
+  const rotatedAtMs = dateMs(
+    keyMetadata.rotated_at ??
+      keyMetadata.rotatedAt ??
+      keyMetadata.created_at ??
+      keyMetadata.createdAt
+  );
+
+  const base = {
+    status: 'unknown',
+    source: 'local_metadata',
+    rotation_required: false,
+    rotation_days: rotationDays,
+    warning_days: warningDays,
+    rotated_at: null,
+    rotation_due_at: null,
+    checked_at: isoFromMs(nowMs),
+  };
+
+  if (rotatedAtMs === null) {
+    return {
+      ...base,
+      code: 'KEY_ROTATION_TIMESTAMP_MISSING',
+      message: 'Venue key rotation timestamp is not present in local metadata.',
+    };
+  }
+
+  const dueMs = rotatedAtMs + rotationDays * DAY_MS;
+  const remainingMs = dueMs - nowMs;
+  const status =
+    remainingMs <= 0 ? 'expired' : remainingMs <= warningDays * DAY_MS ? 'due_soon' : 'fresh';
+  return {
+    ...base,
+    status,
+    code: status === 'expired' ? 'KEY_ROTATION_EXPIRED' : null,
+    rotation_required: status === 'expired',
+    rotated_at: isoFromMs(rotatedAtMs),
+    rotation_due_at: isoFromMs(dueMs),
+    remaining_ms: Math.max(0, remainingMs),
+    message:
+      status === 'expired'
+        ? 'Venue key rotation window has expired; rotate the local venue key before dispatch.'
+        : status === 'due_soon'
+          ? 'Venue key rotation window is nearing expiry.'
+          : 'Venue key rotation metadata is fresh.',
   };
 }
 
@@ -262,6 +359,9 @@ export function verifyVenueKeyOperationalProof(keyMetadata, options = {}) {
     venue_id: venueId = keyMetadata?.venue_id,
     required_permissions: requiredPermissions = DEFAULT_OKX_TRADE_REQUIRED_PERMISSIONS,
     require_ip_allowlist: requireIpAllowlist = venueId === 'okx',
+    require_rotation_freshness: requireRotationFreshness = true,
+    rotation_warning_days: rotationWarningDays = DEFAULT_VENUE_KEY_ROTATION_WARNING_DAYS,
+    now = new Date(),
   } = options;
   if (!keyMetadata || typeof keyMetadata !== 'object') {
     return {
@@ -313,6 +413,18 @@ export function verifyVenueKeyOperationalProof(keyMetadata, options = {}) {
       require_ip_allowlist: true,
     };
   }
+  const rotationProof = buildVenueKeyRotationProof(keyMetadata, {
+    now,
+    warning_days: rotationWarningDays,
+  });
+  if (requireRotationFreshness && rotationProof.status === 'expired') {
+    return {
+      status: 'error',
+      code: 'KEY_ROTATION_EXPIRED',
+      message: rotationProof.message,
+      rotation_proof: rotationProof,
+    };
+  }
   return {
     status: 'ok',
     venue_id: keyMetadata.venue_id,
@@ -329,6 +441,7 @@ export function verifyVenueKeyOperationalProof(keyMetadata, options = {}) {
       source: 'metadata_attestation',
       verified_at: null,
     },
+    rotation_proof: rotationProof,
   };
 }
 

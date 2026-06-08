@@ -38,6 +38,7 @@ function okxPolicy(overrides = {}) {
       max_quote_amount: overrides.max_quote_amount || '1000',
       ...(overrides.constraints || {}),
     },
+    trigger: overrides.trigger || {},
     task_template: {
       venue_id: 'okx',
       action_type: 'place_order',
@@ -73,6 +74,216 @@ try {
   assert.equal(planOnly.results[0].status, 'planned');
   assert.equal(planOnly.results[0].local_decision, 'planned_no_dispatch');
 
+  let planInventoryCalled = false;
+  const baseNormalizedPolicy = planPolicyStore.policies[0];
+  const riskPlanOnly = await runDuePolicyTasks({
+    policyStore: {
+      ...planPolicyStore,
+      policies: [
+        {
+          ...baseNormalizedPolicy,
+          policy_id: 'runner-okx-risk-plan',
+          constraints: {
+            risk_checks: {
+              min_available_balances: [{ venue_id: 'okx', asset: 'USDT', amount: '900' }],
+            },
+          },
+        },
+      ],
+    },
+    secretStore,
+    now: NOW,
+    getInventorySnapshot: async () => {
+      planInventoryCalled = true;
+      throw new Error('plan mode should not fetch inventory');
+    },
+  });
+  assert.equal(riskPlanOnly.status, 'ok');
+  assert.equal(riskPlanOnly.results[0].status, 'planned');
+  assert.equal(planInventoryCalled, false);
+
+  let readinessAfterInventoryCalled = false;
+  const riskReady = await runDuePolicyTasks({
+    policyStore: {
+      ...planPolicyStore,
+      policies: [
+        {
+          ...baseNormalizedPolicy,
+          policy_id: 'runner-okx-risk-ready',
+          constraints: {
+            risk_checks: {
+              max_inventory_age_ms: 60_000,
+              min_available_balances: [{ venue_id: 'okx', asset: 'USDT', amount: '900' }],
+            },
+          },
+        },
+      ],
+    },
+    secretStore,
+    now: NOW,
+    checkReadiness: true,
+    getInventorySnapshot: async ({ scope, live }) => {
+      assert.deepEqual(scope, ['okx']);
+      assert.equal(live, false);
+      return {
+        status: 'ok',
+        generated_at: '2026-06-03T00:00:00.000Z',
+        positions: [
+          {
+            venue_id: 'okx',
+            asset: 'USDT',
+            available: '1000',
+            value_usd: '1000',
+            observed_at: '2026-06-03T00:00:00.000Z',
+          },
+        ],
+        access_issues: [],
+        live_reads: [{ venue_id: 'okx', status: 'ok' }],
+      };
+    },
+    getReadiness: async () => {
+      readinessAfterInventoryCalled = true;
+      return {
+        status: 'ok',
+        venue_id: 'okx',
+        ready_venue_ids: ['okx'],
+        dispatch_ready_source: 'test_inventory_ready',
+      };
+    },
+  });
+  assert.equal(riskReady.status, 'ok');
+  assert.equal(riskReady.results[0].status, 'ready');
+  assert.equal(riskReady.results[0].inventory_guard.status, 'ok');
+  assert.equal(readinessAfterInventoryCalled, true);
+
+  let triggerReadinessCalled = false;
+  const triggerSkipped = await runDuePolicyTasks({
+    policyStore: {
+      ...planPolicyStore,
+      policies: [
+        {
+          ...baseNormalizedPolicy,
+          policy_id: 'runner-okx-trigger-skip',
+          trigger: {
+            type: 'price_below',
+            venue_id: 'okx',
+            symbol: 'BTC-USDT',
+            threshold: '89000',
+          },
+        },
+      ],
+    },
+    secretStore,
+    now: NOW,
+    checkReadiness: true,
+    marketSnapshot: {
+      markets: [{ venue_id: 'okx', symbol: 'BTC-USDT', price: '90000' }],
+    },
+    getReadiness: async () => {
+      triggerReadinessCalled = true;
+    },
+  });
+  assert.equal(triggerSkipped.status, 'ok');
+  assert.equal(triggerSkipped.results[0].status, 'skipped');
+  assert.equal(triggerSkipped.results[0].code, 'POLICY_TRIGGER_NOT_SATISFIED');
+  assert.equal(triggerSkipped.results[0].market_trigger.local_decision, 'trigger_not_satisfied');
+  assert.equal(triggerReadinessCalled, false);
+  assert.equal(triggerSkipped.skipped_task_count, 1);
+
+  let triggerReadyCalled = false;
+  const triggerReady = await runDuePolicyTasks({
+    policyStore: {
+      ...planPolicyStore,
+      policies: [
+        {
+          ...baseNormalizedPolicy,
+          policy_id: 'runner-okx-trigger-ready',
+          trigger: {
+            type: 'price_below',
+            venue_id: 'okx',
+            symbol: 'BTC-USDT',
+            threshold: '89000',
+          },
+        },
+      ],
+    },
+    secretStore,
+    now: NOW,
+    checkReadiness: true,
+    getMarketSnapshot: async ({ scope }) => {
+      assert.deepEqual(scope, ['okx']);
+      return {
+        markets: [{ venue_id: 'okx', symbol: 'BTC-USDT', price: '88000' }],
+      };
+    },
+    getReadiness: async () => {
+      triggerReadyCalled = true;
+      return {
+        status: 'ok',
+        venue_id: 'okx',
+        ready_venue_ids: ['okx'],
+        dispatch_ready_source: 'test_trigger_ready',
+      };
+    },
+  });
+  assert.equal(triggerReady.status, 'ok');
+  assert.equal(triggerReady.results[0].status, 'ready');
+  assert.equal(triggerReady.results[0].market_trigger.status, 'ok');
+  assert.equal(triggerReadyCalled, true);
+
+  const missingMarketSnapshot = await runDuePolicyTasks({
+    policyStore: {
+      ...planPolicyStore,
+      policies: [
+        {
+          ...baseNormalizedPolicy,
+          policy_id: 'runner-okx-trigger-missing-snapshot',
+          trigger: {
+            type: 'price_below',
+            venue_id: 'okx',
+            symbol: 'BTC-USDT',
+            threshold: '89000',
+          },
+        },
+      ],
+    },
+    secretStore,
+    now: NOW,
+    checkReadiness: true,
+    getReadiness: async () => {
+      throw new Error('readiness should not run without trigger data');
+    },
+  });
+  assert.equal(missingMarketSnapshot.status, 'blocked');
+  assert.equal(missingMarketSnapshot.results[0].code, 'POLICY_MARKET_SNAPSHOT_REQUIRED');
+
+  let missingInventoryReadinessCalled = false;
+  const missingInventory = await runDuePolicyTasks({
+    policyStore: {
+      ...planPolicyStore,
+      policies: [
+        {
+          ...baseNormalizedPolicy,
+          policy_id: 'runner-okx-risk-missing-inventory',
+          constraints: {
+            risk_checks: {
+              min_available_balances: [{ venue_id: 'okx', asset: 'USDT', amount: '900' }],
+            },
+          },
+        },
+      ],
+    },
+    secretStore,
+    now: NOW,
+    checkReadiness: true,
+    getReadiness: async () => {
+      missingInventoryReadinessCalled = true;
+    },
+  });
+  assert.equal(missingInventory.status, 'blocked');
+  assert.equal(missingInventory.results[0].code, 'POLICY_INVENTORY_SNAPSHOT_REQUIRED');
+  assert.equal(missingInventoryReadinessCalled, false);
+
   const cappedPolicyStorePath = path.join(dir, 'capped-policies.json');
   await upsertLocalPolicy(okxPolicy({ policy_id: 'runner-okx-capped', max_quote_amount: '10' }), {
     configPath: cappedPolicyStorePath,
@@ -95,10 +306,53 @@ try {
       agent_id: 'codex',
       command: `${process.execPath} fake-agent.mjs`,
       capabilities: ['return_evidence'],
+      task_capabilities: ['okx:place_order'],
     },
     { configPath: agentRegistryPath }
   );
   assert.equal(agent.status, 'ok');
+
+  const limitedAgent = await upsertRegisteredAgent(
+    {
+      agent_id: 'limited',
+      command: `${process.execPath} limited-agent.mjs`,
+      capabilities: ['return_evidence'],
+      task_capabilities: ['ethereum:submit_tx'],
+    },
+    { configPath: agentRegistryPath }
+  );
+  assert.equal(limitedAgent.status, 'ok');
+
+  let deniedCapabilityReadinessCalled = false;
+  const deniedCapabilityRun = await runDuePolicyTasks({
+    policyStore: {
+      ...planPolicyStore,
+      policies: [
+        {
+          ...baseNormalizedPolicy,
+          policy_id: 'runner-okx-denied-agent-capability',
+          target_agent: 'limited',
+        },
+      ],
+    },
+    secretStore,
+    agentRegistry: {
+      status: 'ok',
+      agents: [agent.agent, limitedAgent.agent],
+    },
+    now: NOW,
+    dispatch: true,
+    getReadiness: async () => {
+      deniedCapabilityReadinessCalled = true;
+    },
+  });
+  assert.equal(deniedCapabilityRun.status, 'blocked');
+  assert.equal(deniedCapabilityRun.results[0].code, 'AGENT_TASK_CAPABILITY_DENIED');
+  assert.equal(
+    deniedCapabilityRun.results[0].task_capability.required_task_capability.venue_id,
+    'okx'
+  );
+  assert.equal(deniedCapabilityReadinessCalled, false);
 
   let readinessCalled = false;
   let dispatchCalled = false;
@@ -151,6 +405,9 @@ try {
   assert.equal(dispatchRun.dispatched_task_count, 1);
   assert.equal(dispatchRun.results[0].status, 'dispatched');
   assert.equal(dispatchRun.results[0].registered_agent.agent_id, 'codex');
+  assert.deepEqual(dispatchRun.results[0].registered_agent.task_capabilities, [
+    { venue_id: 'okx', action_type: 'place_order' },
+  ]);
   assert.equal(
     dispatchRun.results[0].dispatch.receipt_verification.reason,
     'disabled_by_policy_run_once'

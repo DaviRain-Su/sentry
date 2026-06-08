@@ -218,6 +218,7 @@ assert.equal(solanaLive.positions[0].asset, 'SOL');
 assert.equal(solanaLive.positions[0].quantity, '2');
 assert.equal(solanaLive.positions[1].quantity, '2.5');
 assert.equal(solanaLive.live_reads[0].venue_id, 'solana-mainnet');
+assert.equal(solanaLive.live_reads[0].rpc_retry.getBalance.attempts, 1);
 
 const missingSolanaAddress = await buildLiveInventorySnapshot({
   secretStore,
@@ -264,6 +265,7 @@ assert.equal(ethereumLive.positions[0].quantity, '2');
 assert.equal(ethereumLive.positions[1].asset, 'USDC');
 assert.equal(ethereumLive.positions[1].quantity, '3');
 assert.equal(ethereumLive.live_reads[0].venue_id, 'ethereum-mainnet');
+assert.equal(ethereumLive.live_reads[0].rpc_retry.eth_getBalance.attempts, 1);
 
 const missingEthereumAddress = await buildLiveInventorySnapshot({
   secretStore,

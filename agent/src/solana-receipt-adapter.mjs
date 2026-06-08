@@ -4,6 +4,7 @@ import {
   isSolanaSignature,
   verifySolanaAgentTaskResult,
 } from '../../core/solana-trade.js';
+import { chainRpcRetrySummary, fetchChainRpcJsonWithBackoff } from './chain-rpc-rate-limit.mjs';
 import { SOLANA_MAINNET_RPC_URL, solanaRpcRequest } from './solana-readonly-adapter.mjs';
 
 function signatureFromResult(result = {}) {
@@ -112,6 +113,9 @@ export async function fetchSolanaTransactionReceipt({
   env = process.env,
   fetchImpl = fetch,
   now = new Date(),
+  rateLimiter = null,
+  rateLimitPolicy = {},
+  sleepImpl,
 } = {}) {
   const taskResult = result || {};
   const taskCheck = verifySolanaAgentTaskResult(taskResult, task);
@@ -119,12 +123,30 @@ export async function fetchSolanaTransactionReceipt({
   const request = solanaSignatureStatusRequest({ task, result: taskResult, signature });
   if (request.status !== 'ok') return request;
   const rpcUrl = env.SENTRY_SOLANA_RPC_URL || SOLANA_MAINNET_RPC_URL;
-  const response = await fetchImpl(rpcUrl, {
-    method: request.method,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(request.body),
+  const fetched = await fetchChainRpcJsonWithBackoff({
+    policy: rateLimitPolicy,
+    sleep: sleepImpl,
+    rateLimiter,
+    bucket: 'solana:getSignatureStatuses',
+    fetchOnce: async () => {
+      const response = await fetchImpl(rpcUrl, {
+        method: request.method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request.body),
+      });
+      const body = await response.json();
+      return { response, body };
+    },
   });
-  const body = await response.json();
+  if (fetched.error) {
+    return {
+      status: 'error',
+      code: 'SOLANA_NETWORK_ERROR',
+      message: fetched.error?.message || String(fetched.error),
+      retry: chainRpcRetrySummary(fetched),
+    };
+  }
+  const { response, body } = fetched;
   if (!response.ok || body.error) {
     return {
       status: 'error',
@@ -133,11 +155,15 @@ export async function fetchSolanaTransactionReceipt({
       http_status: response.status,
       message: body.error?.message || `Solana HTTP ${response.status}`,
       solana_body: body,
+      retry: chainRpcRetrySummary(fetched),
     };
   }
-  return normalizeSolanaSignatureStatusResponse(body, {
-    signature: request.signature,
-    idempotency_key: request.idempotency_key,
-    observed_at: (typeof now === 'function' ? now() : now).toISOString(),
-  });
+  return {
+    ...normalizeSolanaSignatureStatusResponse(body, {
+      signature: request.signature,
+      idempotency_key: request.idempotency_key,
+      observed_at: (typeof now === 'function' ? now() : now).toISOString(),
+    }),
+    retry: chainRpcRetrySummary(fetched),
+  };
 }

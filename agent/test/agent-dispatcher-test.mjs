@@ -356,6 +356,41 @@ process.stdin.on('end', () => {
   assert.equal(solanaDispatch.authorization.dispatch_ready_source, 'local_daemon');
   assert.equal(solanaDispatch.agent_result.evidence.signature, solanaSignature);
 
+  const solanaProposedAgent = path.join(dir, 'solana-proposed-agent.mjs');
+  await writeFile(
+    solanaProposedAgent,
+    `
+let input = '';
+process.stdin.on('data', (chunk) => { input += chunk.toString(); });
+process.stdin.on('end', () => {
+  const task = JSON.parse(input);
+  console.log(JSON.stringify({
+    task_id: task.task_id,
+    status: 'proposed',
+    evidence: {
+      venue_id: 'solana-mainnet',
+      chain_id: 'solana:mainnet',
+      quote_id: task.action.params.quote_id,
+      unsigned_transaction_base64: 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==',
+      required_signers: [task.action.params.owner],
+      simulation: { status: 'ok', units_consumed: 1000 },
+    },
+  }));
+});
+`
+  );
+  const solanaProposedDispatch = await dispatchAgentTask({
+    task: solanaTask.task,
+    commandLine: `${process.execPath} ${solanaProposedAgent}`,
+    localDispatchReadyVenues: ['solana-mainnet'],
+  });
+  assert.equal(solanaProposedDispatch.status, 'ok');
+  assert.equal(solanaProposedDispatch.agent_result.status, 'proposed');
+  assert.equal(
+    solanaProposedDispatch.agent_result.evidence.unsigned_transaction_base64.includes('AAAA'),
+    true
+  );
+
   const badSolanaAgent = path.join(dir, 'bad-solana-agent.mjs');
   await writeFile(
     badSolanaAgent,
@@ -427,6 +462,41 @@ process.stdin.on('end', () => {
   assert.equal(ethereumDispatch.status, 'ok');
   assert.equal(ethereumDispatch.authorization.dispatch_ready_source, 'local_daemon');
   assert.equal(ethereumDispatch.agent_result.evidence.tx_hash, ethereumTxHash);
+
+  const badEthereumProposedAgent = path.join(dir, 'bad-ethereum-proposed-agent.mjs');
+  await writeFile(
+    badEthereumProposedAgent,
+    `
+let input = '';
+process.stdin.on('data', (chunk) => { input += chunk.toString(); });
+process.stdin.on('end', () => {
+  const task = JSON.parse(input);
+  console.log(JSON.stringify({
+    task_id: task.task_id,
+    status: 'proposed',
+    evidence: {
+      venue_id: 'ethereum-mainnet',
+      chain_id: 'eip155:1',
+      quote_id: task.action.params.quote_id,
+      transaction_request: {
+        from: '0x0000000000000000000000000000000000000005',
+        to: '0x0000000000000000000000000000000000000004',
+        data: '0x095ea7b3',
+        value: '0',
+      },
+      simulation: { status: 'success' },
+    },
+  }));
+});
+`
+  );
+  const badEthereumProposedDispatch = await dispatchAgentTask({
+    task: ethereumTask.task,
+    commandLine: `${process.execPath} ${badEthereumProposedAgent}`,
+    localDispatchReadyVenues: ['ethereum-mainnet'],
+  });
+  assert.equal(badEthereumProposedDispatch.status, 'error');
+  assert.equal(badEthereumProposedDispatch.code, 'ETHEREUM_FROM_ADDRESS_MISMATCH');
 
   const badEthereumAgent = path.join(dir, 'bad-ethereum-agent.mjs');
   await writeFile(

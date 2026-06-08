@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Writable } from 'node:stream';
 import { buildEthereumSwapTask } from '../../core/ethereum-trade.js';
 import { buildLocalSecretStoreSnapshot } from '../../core/local-secrets.js';
 import { buildHyperliquidPlaceOrderTask } from '../../core/hyperliquid-trade.js';
@@ -12,6 +14,39 @@ import { readHyperliquidNonceStore } from '../src/hyperliquid-nonce-store.mjs';
 
 const timestamp = '2026-06-03T00:00:00.000Z';
 const dir = await mkdtemp(path.join(tmpdir(), 'sentry-dispatch-receipt-'));
+
+function mockSignerSpawn(handler) {
+  const calls = [];
+  const spawnImpl = (cmd, args, options) => {
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    let stdinBody = '';
+    child.stdin = new Writable({
+      write(chunk, _encoding, callback) {
+        stdinBody += chunk.toString();
+        callback();
+      },
+      final(callback) {
+        const payload = JSON.parse(stdinBody);
+        calls.push({ cmd, args, env: options.env, payload });
+        Promise.resolve(handler({ cmd, args, env: options.env, payload }))
+          .then((result = {}) => {
+            if (result.stdout) child.stdout.emit('data', Buffer.from(result.stdout));
+            if (result.stderr) child.stderr.emit('data', Buffer.from(result.stderr));
+            child.emit('close', result.exitCode ?? 0, result.signal ?? null);
+          })
+          .catch((error) => child.emit('error', error));
+        callback();
+      },
+    });
+    child.kill = () => {
+      child.killed = true;
+    };
+    return child;
+  };
+  return { calls, spawnImpl };
+}
 
 try {
   const keyRecord = {
@@ -558,6 +593,67 @@ try {
     params: [[solanaSignature], { searchTransactionHistory: true }],
   });
 
+  const solanaUnsigned = Buffer.from('unsigned-solana-receipt-transaction').toString('base64');
+  const proposedSolanaDispatch = {
+    status: 'ok',
+    local_decision: 'accepted_result',
+    task_id: solanaTask.task.task_id,
+    agent_result: {
+      task_id: solanaTask.task.task_id,
+      status: 'proposed',
+      evidence: {
+        venue_id: 'solana-mainnet',
+        chain_id: 'solana:mainnet',
+        quote_id: 'quote_solana_receipt_1',
+        unsigned_transaction_base64: solanaUnsigned,
+        required_signers: [solanaTask.task.policy_context.owner],
+        simulation: { status: 'ok' },
+      },
+    },
+  };
+  const solanaSignerMock = mockSignerSpawn(({ payload }) => {
+    assert.equal(payload.venue_id, 'solana-mainnet');
+    assert.equal(payload.prepared_transaction.unsigned_transaction_base64, solanaUnsigned);
+    return { stdout: `${JSON.stringify({ signature: solanaSignature })}\n` };
+  });
+  const verifiedProposedSolana = await verifyDispatchReceipt({
+    task: solanaTask.task,
+    dispatch: proposedSolanaDispatch,
+    secretStore,
+    now: new Date(timestamp),
+    env: {
+      SENTRY_SOLANA_RPC_URL: 'https://solana.invalid',
+      SENTRY_SOLANA_SIGNER_COMMAND: 'ows-solana submit',
+    },
+    signerSpawnImpl: solanaSignerMock.spawnImpl,
+    fetchImpl: async (_url, init) => {
+      capturedSolanaRpcBody = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            result: {
+              value: [
+                {
+                  slot: 123456,
+                  confirmations: null,
+                  err: null,
+                  confirmationStatus: 'finalized',
+                },
+              ],
+            },
+          };
+        },
+      };
+    },
+  });
+  assert.equal(verifiedProposedSolana.status, 'ok');
+  assert.equal(verifiedProposedSolana.dispatch.agent_result.status, 'submitted');
+  assert.equal(verifiedProposedSolana.receipt_verification.signer_handoff.status, 'ok');
+  assert.equal(verifiedProposedSolana.dispatch.agent_result.evidence.signer_handoff, true);
+  assert.deepEqual(solanaSignerMock.calls[0].args, ['submit']);
+
   const ethereumTxHash = '0x1111111111111111111111111111111111111111111111111111111111111111';
   const ethereumTask = buildEthereumSwapTask({
     taskId: 'task_ethereum_receipt_1',
@@ -628,6 +724,71 @@ try {
     method: 'eth_getTransactionReceipt',
     params: [ethereumTxHash],
   });
+
+  const proposedEthereumDispatch = {
+    status: 'ok',
+    local_decision: 'accepted_result',
+    task_id: ethereumTask.task.task_id,
+    agent_result: {
+      task_id: ethereumTask.task.task_id,
+      status: 'proposed',
+      evidence: {
+        venue_id: 'ethereum-mainnet',
+        chain_id: 'eip155:1',
+        quote_id: 'quote_ethereum_receipt_1',
+        transaction_request: {
+          from: ethereumTask.task.policy_context.account,
+          to: '0xe592427a0aece92de3edee1f18e0157c05861564',
+          data: '0x414bf389',
+          value: '0',
+        },
+        simulation: { status: 'ok' },
+      },
+    },
+  };
+  const ethereumSignerMock = mockSignerSpawn(({ payload }) => {
+    assert.equal(payload.venue_id, 'ethereum-mainnet');
+    assert.equal(
+      payload.prepared_transaction.transaction_request.from,
+      ethereumTask.task.policy_context.account
+    );
+    return { stdout: `${JSON.stringify({ tx_hash: ethereumTxHash })}\n` };
+  });
+  const verifiedProposedEthereum = await verifyDispatchReceipt({
+    task: ethereumTask.task,
+    dispatch: proposedEthereumDispatch,
+    secretStore,
+    now: new Date(timestamp),
+    env: {
+      SENTRY_ETHEREUM_RPC_URL: 'https://ethereum.invalid',
+      SENTRY_ETHEREUM_SIGNER_COMMAND: 'safe-cli send-json',
+    },
+    signerSpawnImpl: ethereumSignerMock.spawnImpl,
+    fetchImpl: async (_url, init) => {
+      capturedEthereumRpcBody = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            result: {
+              transactionHash: ethereumTxHash,
+              blockHash: '0x2222222222222222222222222222222222222222222222222222222222222222',
+              blockNumber: '0x123',
+              status: '0x1',
+              gasUsed: '0x5208',
+              effectiveGasPrice: '0x3b9aca00',
+            },
+          };
+        },
+      };
+    },
+  });
+  assert.equal(verifiedProposedEthereum.status, 'ok');
+  assert.equal(verifiedProposedEthereum.dispatch.agent_result.status, 'submitted');
+  assert.equal(verifiedProposedEthereum.receipt_verification.signer_handoff.status, 'ok');
+  assert.equal(verifiedProposedEthereum.dispatch.agent_result.evidence.signer_handoff, true);
+  assert.deepEqual(ethereumSignerMock.calls[0].args, ['send-json']);
 
   const skipped = await verifyDispatchReceipt({
     task: { venue_id: 'sui-testnet-demo', action: { type: 'submit_tx' } },

@@ -42,7 +42,8 @@ const built = buildHyperliquidPlaceOrderTask({
   size: '0.01',
   price: '99000',
   tif: 'Gtc',
-  maxNotionalUsd: '1000',
+  max_quote_amount: '1000',
+  slippageBps: 50,
   cloid,
   nowMs: 1_780_000_000_000,
   expiresAtMs: 1_780_000_120_000,
@@ -56,6 +57,8 @@ assert.equal(built.task.action.params.coin, 'BTC');
 assert.equal(built.task.action.params.isBuy, true);
 assert.equal(built.task.action.params.tif, 'Gtc');
 assert.equal(built.task.constraints.idempotency_key, cloid);
+assert.equal(built.task.constraints.max_notional_usd, '1000');
+assert.equal(built.task.constraints.slippage_bps, '50');
 assert.equal(built.task.constraints.no_withdraw, true);
 assert.deepEqual(built.task.constraints.capabilities_required, ['read', 'place_order']);
 assert.equal(built.task.authorization.authorization_ref, 'hyperliquid:hl_agent_trade');

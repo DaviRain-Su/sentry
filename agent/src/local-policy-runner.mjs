@@ -5,6 +5,14 @@ import { getLocalDispatchReadiness } from './local-dispatch-readiness.mjs';
 import { resolveAgentDispatchCommand } from './local-agent-registry.mjs';
 import { markLocalPolicyTick } from './local-policy-store.mjs';
 import { buildDuePolicyTaskPlan } from './local-policy-task-planner.mjs';
+import {
+  evaluateLocalPolicyRiskGuard,
+  localPolicyRiskGuardRequired,
+} from './local-policy-risk-guard.mjs';
+import {
+  evaluateLocalPolicyTriggerGuard,
+  localPolicyTriggerGuardRequired,
+} from './local-policy-trigger-guard.mjs';
 
 const SUPPORTED_POLICY_ACTIONS = {
   okx: ['place_order'],
@@ -298,6 +306,7 @@ function policyTickStatus(results, policyId) {
   if (scoped.some((result) => result.status === 'dispatched')) return 'run_once_dispatched';
   if (scoped.some((result) => result.status === 'ready')) return 'run_once_ready';
   if (scoped.some((result) => result.status === 'planned')) return 'run_once_planned';
+  if (scoped.some((result) => result.status === 'skipped')) return 'run_once_not_triggered';
   return 'run_once_blocked';
 }
 
@@ -306,10 +315,38 @@ async function maybeRecordActivity(recordActivity, payload) {
   return recordActivity(payload);
 }
 
+async function resolveInventorySnapshot(policy, task, options, now) {
+  if (options.inventorySnapshot || options.inventory_snapshot) {
+    return options.inventorySnapshot || options.inventory_snapshot;
+  }
+  if (typeof options.getInventorySnapshot !== 'function') return null;
+  return options.getInventorySnapshot({
+    policy,
+    task,
+    scope: [taskVenueId(task)].filter(Boolean),
+    live: Boolean(options.liveInventory || options.live_inventory),
+    now,
+  });
+}
+
+async function resolveMarketSnapshot(policy, task, options, now) {
+  if (options.marketSnapshot || options.market_snapshot) {
+    return options.marketSnapshot || options.market_snapshot;
+  }
+  if (typeof options.getMarketSnapshot !== 'function') return null;
+  return options.getMarketSnapshot({
+    policy,
+    task,
+    scope: [taskVenueId(task)].filter(Boolean),
+    now,
+  });
+}
+
 export async function runDuePolicyTasks(options = {}) {
   const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
   const dispatch = Boolean(options.dispatch);
   const checkReadiness = Boolean(options.checkReadiness || dispatch);
+  const checkInventory = Boolean(options.checkInventory || options.check_inventory);
   const policyStore = options.policyStore || {};
   const policies = Array.isArray(policyStore.policies) ? policyStore.policies : [];
   const policyById = new Map(policies.map((policy) => [policy.policy_id, policy]));
@@ -354,12 +391,111 @@ export async function runDuePolicyTasks(options = {}) {
       continue;
     }
 
+    const shouldRunInventoryGuard =
+      (checkReadiness || checkInventory || dispatch) && localPolicyRiskGuardRequired(policy);
+    const shouldRunTriggerGuard =
+      (checkReadiness ||
+        checkInventory ||
+        dispatch ||
+        options.checkTriggers ||
+        options.check_triggers) &&
+      localPolicyTriggerGuardRequired(policy);
+    let triggerGuard = {
+      status: 'skipped',
+      local_decision: 'trigger_guard_not_requested',
+    };
+    if (shouldRunTriggerGuard) {
+      const marketSnapshot = await resolveMarketSnapshot(policy, entry.task, options, now);
+      triggerGuard = evaluateLocalPolicyTriggerGuard(policy, entry.task, {
+        marketSnapshot,
+        now,
+      });
+      if (triggerGuard.status === 'skipped') {
+        results.push({
+          ...taskResultBase(entry),
+          status: 'skipped',
+          local_decision: triggerGuard.local_decision,
+          code: triggerGuard.code || null,
+          message: triggerGuard.message || null,
+          guard,
+          market_trigger: triggerGuard,
+        });
+        await maybeRecordActivity(options.recordActivity, {
+          type: 'policy.local.run_once.noop',
+          task: entry.task,
+          status: 'skipped',
+          code: triggerGuard.code || null,
+          message: triggerGuard.message || null,
+          local_decision: triggerGuard.local_decision,
+        });
+        continue;
+      }
+      if (triggerGuard.status !== 'ok') {
+        const blocked = {
+          ...taskResultBase(entry),
+          status: 'blocked',
+          local_decision: triggerGuard.local_decision,
+          code: triggerGuard.code,
+          message: triggerGuard.message,
+          guard,
+          market_trigger: triggerGuard,
+        };
+        results.push(blocked);
+        await maybeRecordActivity(options.recordActivity, {
+          type: 'policy.local.run_once.blocked',
+          task: entry.task,
+          status: 'error',
+          code: triggerGuard.code,
+          message: triggerGuard.message,
+          local_decision: triggerGuard.local_decision,
+          marketTrigger: triggerGuard,
+        });
+        continue;
+      }
+    }
+    let inventoryGuard = {
+      status: 'skipped',
+      local_decision: 'inventory_guard_not_requested',
+    };
+    if (shouldRunInventoryGuard) {
+      const inventorySnapshot = await resolveInventorySnapshot(policy, entry.task, options, now);
+      inventoryGuard = evaluateLocalPolicyRiskGuard(policy, entry.task, {
+        inventorySnapshot,
+        now,
+      });
+      if (inventoryGuard.status !== 'ok' && inventoryGuard.status !== 'skipped') {
+        const blocked = {
+          ...taskResultBase(entry),
+          status: 'blocked',
+          local_decision: inventoryGuard.local_decision,
+          code: inventoryGuard.code,
+          message: inventoryGuard.message,
+          guard,
+          market_trigger: triggerGuard,
+          inventory_guard: inventoryGuard,
+        };
+        results.push(blocked);
+        await maybeRecordActivity(options.recordActivity, {
+          type: 'policy.local.run_once.blocked',
+          task: entry.task,
+          status: 'error',
+          code: inventoryGuard.code,
+          message: inventoryGuard.message,
+          local_decision: inventoryGuard.local_decision,
+          inventoryGuard,
+        });
+        continue;
+      }
+    }
+
     if (!checkReadiness) {
       results.push({
         ...taskResultBase(entry),
         status: 'planned',
         local_decision: 'planned_no_dispatch',
         guard,
+        market_trigger: triggerGuard,
+        inventory_guard: inventoryGuard,
       });
       continue;
     }
@@ -379,6 +515,9 @@ export async function runDuePolicyTasks(options = {}) {
         code: commandResolution.code,
         message: commandResolution.message,
         guard,
+        market_trigger: triggerGuard,
+        inventory_guard: inventoryGuard,
+        task_capability: commandResolution.task_capability || null,
       };
       results.push(blocked);
       await maybeRecordActivity(options.recordActivity, {
@@ -395,7 +534,9 @@ export async function runDuePolicyTasks(options = {}) {
     const readiness = await (options.getReadiness || getLocalDispatchReadiness)({
       task: entry.task,
       secretStore: options.secretStore,
+      walletStore: options.walletStore,
       verifyHyperliquidLiveGrant: options.verifyHyperliquidLiveGrant === true,
+      verifyOkxLiveRead: options.verifyOkxLiveRead === true,
       requireSignerProbe: Boolean(options.requireSignerProbe),
       signerProbeTimeoutMs: Number(options.signerProbeTimeoutMs || 3000),
       env: options.env || process.env,
@@ -410,6 +551,8 @@ export async function runDuePolicyTasks(options = {}) {
         code: readiness.code,
         message: readiness.message,
         guard,
+        market_trigger: triggerGuard,
+        inventory_guard: inventoryGuard,
         local_dispatch_readiness: readiness,
       };
       results.push(blocked);
@@ -428,6 +571,8 @@ export async function runDuePolicyTasks(options = {}) {
         status: 'ready',
         local_decision: 'ready_no_dispatch',
         guard,
+        market_trigger: triggerGuard,
+        inventory_guard: inventoryGuard,
         local_dispatch_readiness: readiness,
       });
       continue;
@@ -454,6 +599,11 @@ export async function runDuePolicyTasks(options = {}) {
             simulated: Boolean(options.simulated),
             hyperliquidNonceStorePath: options.hyperliquidNonceStorePath,
             verifyHyperliquidLiveGrant: options.verifyHyperliquidLiveGrant === true,
+            solanaSignerCommand: options.solanaSignerCommand,
+            ethereumSignerCommand: options.ethereumSignerCommand,
+            signerCommand: options.signerCommand,
+            signerTimeoutMs: Number(options.signerTimeoutMs || options.timeoutMs || 30_000),
+            ...(options.signerSpawnImpl ? { signerSpawnImpl: options.signerSpawnImpl } : {}),
             env: options.env || process.env,
             fetchImpl: options.fetchImpl || fetch,
             now,
@@ -482,12 +632,16 @@ export async function runDuePolicyTasks(options = {}) {
       code: finalDispatch.code || null,
       message: finalDispatch.message || null,
       guard,
+      market_trigger: triggerGuard,
+      inventory_guard: inventoryGuard,
       local_dispatch_readiness: readiness,
       dispatch: finalDispatch,
       registered_agent: commandResolution.agent_id
         ? {
             agent_id: commandResolution.agent_id,
             capabilities: commandResolution.capabilities,
+            task_capabilities: commandResolution.task_capabilities,
+            task_capability: commandResolution.task_capability,
           }
         : null,
       unregistered_command: Boolean(commandResolution.unregistered_command),
@@ -497,11 +651,15 @@ export async function runDuePolicyTasks(options = {}) {
       task: entry.task,
       dispatch: finalDispatch,
       localDispatchReadiness: readiness,
+      inventoryGuard,
+      marketTrigger: triggerGuard,
       receiptVerification: finalDispatch.receipt_verification,
       registeredAgent: commandResolution.agent_id
         ? {
             agent_id: commandResolution.agent_id,
             capabilities: commandResolution.capabilities,
+            task_capabilities: commandResolution.task_capabilities,
+            task_capability: commandResolution.task_capability,
           }
         : null,
     });
@@ -532,6 +690,7 @@ export async function runDuePolicyTasks(options = {}) {
     result_count: results.length,
     ready_task_count: results.filter((result) => result.status === 'ready').length,
     dispatched_task_count: results.filter((result) => result.status === 'dispatched').length,
+    skipped_task_count: results.filter((result) => result.status === 'skipped').length,
     blocked_task_count: results.filter((result) => ['blocked', 'error'].includes(result.status))
       .length,
     results,

@@ -7,6 +7,7 @@ import {
   normalizeOkxBalanceResponse,
   okxBalanceRequest,
   signOkxRequest,
+  verifyOkxLiveReadProof,
 } from '../src/okx-readonly-adapter.mjs';
 
 const timestamp = '2026-06-03T00:00:00.000Z';
@@ -139,6 +140,64 @@ assert.equal(JSON.stringify(capturedHeaders).includes('test-secret'), false);
 const noCredentials = await fetchOkxAccountBalance({ keyMetadata });
 assert.equal(noCredentials.status, 'error');
 assert.equal(noCredentials.code, 'OKX_CREDENTIALS_REQUIRED');
+
+let proofUrl = null;
+let proofHeaders = null;
+const liveReadProof = await verifyOkxLiveReadProof({
+  credentials: {
+    apiKey: 'test-key',
+    secretKey: 'test-secret',
+    passphrase: 'test-passphrase',
+  },
+  keyMetadata: { ...keyMetadata, key_handle: 'okx_key_ready' },
+  now: new Date(timestamp),
+  fetchImpl: async (url, init) => {
+    proofUrl = url;
+    proofHeaders = init.headers;
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          code: '0',
+          msg: '',
+          data: [{ totalEq: '100', details: [] }],
+        };
+      },
+    };
+  },
+});
+assert.equal(liveReadProof.status, 'ok');
+assert.equal(liveReadProof.proof_source, 'okx_account_balance');
+assert.equal(liveReadProof.key_handle, 'okx_key_ready');
+assert.equal(liveReadProof.request_path, '/api/v5/account/balance');
+assert.equal(liveReadProof.http_status, 200);
+assert.equal(liveReadProof.okx_code, '0');
+assert.equal(proofUrl, 'https://www.okx.com/api/v5/account/balance');
+assert.equal(proofHeaders['OK-ACCESS-KEY'], 'test-key');
+assert.equal(JSON.stringify(liveReadProof).includes('test-secret'), false);
+assert.equal(JSON.stringify(proofHeaders).includes('test-secret'), false);
+
+const rejectedLiveReadProof = await verifyOkxLiveReadProof({
+  credentials: {
+    apiKey: 'test-key',
+    secretKey: 'test-secret',
+    passphrase: 'test-passphrase',
+  },
+  keyMetadata: { ...keyMetadata, key_handle: 'okx_key_ready' },
+  now: new Date(timestamp),
+  fetchImpl: async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { code: '50113', msg: 'Invalid signature' };
+    },
+  }),
+});
+assert.equal(rejectedLiveReadProof.status, 'error');
+assert.equal(rejectedLiveReadProof.code, 'OKX_LIVE_READ_REJECTED');
+assert.equal(rejectedLiveReadProof.okx_code, '50113');
+assert.equal(JSON.stringify(rejectedLiveReadProof).includes('test-secret'), false);
 
 let retryCalls = 0;
 const retrySleeps = [];

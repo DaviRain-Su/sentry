@@ -38,8 +38,8 @@ export const TARGET_VENUES = [
     default_adapters: ['Jupiter', 'Raydium', 'Orca'],
     required_next: [
       'define delegate/PDA authority shape',
-      'connect wallet/account discovery beyond env-based read config',
-      'add transaction construction, simulation and signing handoff',
+      'connect OWS signing/API-token handoff beyond metadata wallet refs',
+      'wire Raydium/Orca builders and live Jupiter dry-runs into the prepared transaction handoff',
       'run live RPC receipt dry-run against a real signature',
     ],
   },
@@ -67,8 +67,8 @@ export const TARGET_VENUES = [
     default_adapters: ['Safe', 'Uniswap', 'Aave'],
     required_next: [
       'choose Safe/session-key guard model',
-      'connect wallet/account discovery beyond env-based read config',
-      'add transaction build/simulation and signing handoff',
+      'connect OWS signing/API-token handoff beyond metadata wallet refs',
+      'wire Safe/session-key signing path and live Uniswap dry-runs into the prepared transaction handoff',
       'run live RPC receipt dry-run against a real transaction hash',
     ],
   },

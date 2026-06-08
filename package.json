@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "config": "node scripts/demo-config.mjs",
     "baseline:smoke": "node scripts/baseline-smoke.mjs",
+    "local-bridge:smoke": "node scripts/local-bridge-smoke.mjs",
+    "test:local-policy": "node test/local-policy-metadata-test.mjs",
     "check": "biome check",
     "lint": "biome check --write .",
     "format": "biome format --write ."

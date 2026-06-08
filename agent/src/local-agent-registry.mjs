@@ -11,6 +11,7 @@ export const DEFAULT_AGENT_CAPABILITIES = [
   'submit_order',
   'return_evidence',
 ];
+export const DEFAULT_AGENT_TASK_CAPABILITIES = [];
 
 const RAW_SECRET_ARG_RE =
   /(^--?(token|secret|password|passphrase|private[-_]?key|api[-_]?key)(=|$))|((token|secret|password|passphrase|private[-_]?key|api[-_]?key)=)/i;
@@ -38,6 +39,19 @@ function unique(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
+function uniqueTaskCapabilities(values) {
+  const seen = new Set();
+  const out = [];
+  for (const capability of values || []) {
+    if (!capability) continue;
+    const key = `${capability.venue_id}:${capability.action_type}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(capability);
+  }
+  return out;
+}
+
 function normalizeAgentId(value) {
   return String(value || '')
     .trim()
@@ -57,6 +71,117 @@ export function parseCapabilityList(value) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeVenueId(value) {
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (text === 'solana') return 'solana-mainnet';
+  if (text === 'ethereum' || text === 'evm') return 'ethereum-mainnet';
+  if (text === 'hl' || text === 'hyperliquid-mainnet') return 'hyperliquid';
+  return text;
+}
+
+function normalizeActionType(value) {
+  const text = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (!text || text === '*') return '*';
+  if (text === 'order') return 'place_order';
+  if (text === 'swap') return 'submit_tx';
+  return text;
+}
+
+function normalizeTaskCapability(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    if (text === '*' || text === '*:*') return { venue_id: '*', action_type: '*' };
+    const [venue, action = '*'] = text.split(/[:/]/);
+    const venueId = normalizeVenueId(venue);
+    const actionType = normalizeActionType(action);
+    return venueId ? { venue_id: venueId, action_type: actionType || '*' } : null;
+  }
+  if (typeof value === 'object') {
+    const venueId = normalizeVenueId(
+      value.venue_id || value.venue || value.target_venue_id || value.targetVenueId
+    );
+    const actionType = normalizeActionType(
+      value.action_type || value.actionType || value.action?.type || value.type || '*'
+    );
+    return venueId ? { venue_id: venueId, action_type: actionType || '*' } : null;
+  }
+  return null;
+}
+
+export function parseTaskCapabilityList(value) {
+  const raw = Array.isArray(value) ? value : parseCapabilityList(value);
+  return uniqueTaskCapabilities(raw.map(normalizeTaskCapability));
+}
+
+function taskRequirement(task = {}) {
+  if (!task || typeof task !== 'object') return null;
+  const venueId = normalizeVenueId(
+    task.venue_id || task.policy_context?.venue_id || task.authorization?.venue_id
+  );
+  const actionType = normalizeActionType(task.action?.type);
+  return venueId && actionType
+    ? {
+        venue_id: venueId,
+        action_type: actionType,
+      }
+    : null;
+}
+
+function taskCapabilityMatches(capability = {}, requirement = {}) {
+  const venueMatches = capability.venue_id === '*' || capability.venue_id === requirement.venue_id;
+  const actionMatches =
+    capability.action_type === '*' || capability.action_type === requirement.action_type;
+  return venueMatches && actionMatches;
+}
+
+export function assessAgentTaskCapability(agent = {}, task = null) {
+  const requirement = taskRequirement(task);
+  if (!requirement) {
+    return {
+      status: 'skipped',
+      reason: 'task_not_provided',
+      declared_task_capabilities: agent.task_capabilities || [],
+      required_task_capability: null,
+    };
+  }
+  const declared = parseTaskCapabilityList(agent.task_capabilities || agent.taskCapabilities);
+  if (!declared.length) {
+    return {
+      status: 'error',
+      code: 'AGENT_TASK_CAPABILITY_UNDECLARED',
+      message:
+        'Registered Agent must declare task_capabilities before autonomous dispatch for this task.',
+      agent_id: agent.agent_id || null,
+      declared_task_capabilities: [],
+      required_task_capability: requirement,
+    };
+  }
+  const matched = declared.find((capability) => taskCapabilityMatches(capability, requirement));
+  if (!matched) {
+    return {
+      status: 'error',
+      code: 'AGENT_TASK_CAPABILITY_DENIED',
+      message: 'Registered Agent does not declare support for this venue/action task.',
+      agent_id: agent.agent_id || null,
+      declared_task_capabilities: declared,
+      required_task_capability: requirement,
+    };
+  }
+  return {
+    status: 'ok',
+    agent_id: agent.agent_id || null,
+    declared_task_capabilities: declared,
+    required_task_capability: requirement,
+    matched_task_capability: matched,
+  };
 }
 
 export function validateRegisteredAgentMetadata(input = {}) {
@@ -86,6 +211,9 @@ export function validateRegisteredAgentMetadata(input = {}) {
   }
 
   const capabilities = unique(parseCapabilityList(input.capabilities));
+  const taskCapabilities = parseTaskCapabilityList(
+    input.task_capabilities || input.taskCapabilities || input.tasks || input.supported_tasks
+  );
   return {
     status: 'ok',
     agent: {
@@ -93,6 +221,9 @@ export function validateRegisteredAgentMetadata(input = {}) {
       display_name: input.display_name || input.name || agentId,
       command,
       capabilities: capabilities.length ? capabilities : DEFAULT_AGENT_CAPABILITIES,
+      task_capabilities: taskCapabilities.length
+        ? taskCapabilities
+        : DEFAULT_AGENT_TASK_CAPABILITIES,
       enabled: input.enabled !== false,
       registered_at: input.registered_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -220,7 +351,7 @@ export function findRegisteredAgent(registry, agentId) {
   return (registry?.agents || []).find((agent) => agent.agent_id === normalized) || null;
 }
 
-export function resolveRegisteredAgentCommand(registry, agentId) {
+export function resolveRegisteredAgentCommand(registry, agentId, options = {}) {
   const agent = findRegisteredAgent(registry, agentId);
   if (!agent) {
     return {
@@ -238,11 +369,23 @@ export function resolveRegisteredAgentCommand(registry, agentId) {
       agent_id: agent.agent_id,
     };
   }
+  const taskCapability = assessAgentTaskCapability(agent, options.task);
+  if (taskCapability.status === 'error') {
+    return {
+      status: 'error',
+      code: taskCapability.code,
+      message: taskCapability.message,
+      agent_id: agent.agent_id,
+      task_capability: taskCapability,
+    };
+  }
   return {
     status: 'ok',
     agent_id: agent.agent_id,
     command: agent.command,
     capabilities: agent.capabilities,
+    task_capabilities: agent.task_capabilities || [],
+    task_capability: taskCapability,
   };
 }
 
@@ -253,7 +396,8 @@ export function resolveAgentDispatchCommand({
 } = {}) {
   const targetAgent =
     payload.target_agent || payload.agent_id || payload.task?.target_agent || null;
-  if (targetAgent) return resolveRegisteredAgentCommand(registry, targetAgent);
+  if (targetAgent)
+    return resolveRegisteredAgentCommand(registry, targetAgent, { task: payload.task });
   if (payload.command) {
     return {
       status: 'ok',

@@ -1,3 +1,5 @@
+import { relayTokenProtocol, tokenFromProtocolHeader } from '../../core/bridge-envelope.js';
+
 export type TokenCheck =
   | { ok: true }
   | {
@@ -16,8 +18,15 @@ function tokenFromHeader(authorizationHeader: string | null): string | null {
 export function tokenFromRequest(req: Request): string | null {
   const headerToken = tokenFromHeader(req.headers.get('Authorization'));
   if (headerToken) return headerToken;
+  const protocolToken = tokenFromProtocolHeader(req.headers.get('Sec-WebSocket-Protocol'));
+  if (protocolToken) return protocolToken;
   const url = new URL(req.url);
   return url.searchParams.get('token')?.trim() || null;
+}
+
+export function relayProtocolFromRequest(req: Request): string | null {
+  const token = tokenFromProtocolHeader(req.headers.get('Sec-WebSocket-Protocol'));
+  return token ? relayTokenProtocol(token) : null;
 }
 
 export function randomToken(prefix: string): string {

@@ -18,6 +18,12 @@ function numericString(value) {
   return Number(text) > 0 ? text : null;
 }
 
+function nonNegativeNumericString(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const text = String(value);
+  return Number(text) >= 0 ? text : null;
+}
+
 function normalizeSide(value) {
   return String(value || '').toLowerCase();
 }
@@ -154,6 +160,9 @@ export function buildOkxPlaceOrderTask(input = {}) {
   const quoteBudget = numericString(
     input.quoteBudget || input.quote_budget || input.max_quote_amount
   );
+  const slippageBps = nonNegativeNumericString(
+    input.slippageBps || input.slippage_bps || input.max_slippage_bps
+  );
   const clientOrderId =
     input.clientOrderId ||
     input.client_order_id ||
@@ -200,6 +209,7 @@ export function buildOkxPlaceOrderTask(input = {}) {
         venue_scope: ['okx'],
         capabilities_required: ['read', 'place_order'],
         max_quote_amount: quoteBudget,
+        slippage_bps: slippageBps,
         idempotency_key: clientOrderId,
         require_receipt: true,
         no_withdraw: true,

@@ -3,6 +3,7 @@ export const ETHEREUM_VENUE_ID = 'ethereum-mainnet';
 export const ETHEREUM_SWAP_ADAPTERS = ['uniswap', 'safe', 'erc4337', 'custom'];
 export const ETHEREUM_TX_HASH_RE = /^0x[a-fA-F0-9]{64}$/;
 export const ETHEREUM_ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+export const ETHEREUM_TRANSACTION_REQUEST_FORMAT = 'evm_transaction_request';
 
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -17,6 +18,13 @@ function numericString(value) {
   const text = stringValue(value);
   if (!/^[0-9]+$/.test(text) || /^0+$/.test(text)) return null;
   return text;
+}
+
+function positiveNumericString(value) {
+  const text = stringValue(value);
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) && number > 0 ? text : null;
 }
 
 function normalizeAddress(value) {
@@ -65,6 +73,63 @@ function ethereumTxHashFromResult(result = {}) {
       evidence.transaction_hash ||
       evidence.tx_digest
   );
+}
+
+function ethereumPreparedTransactionEvidence(result = {}) {
+  const evidence = isObject(result.evidence) ? result.evidence : {};
+  const prepared = isObject(evidence.prepared_transaction) ? evidence.prepared_transaction : {};
+  const request = isObject(evidence.transaction_request)
+    ? evidence.transaction_request
+    : isObject(prepared.transaction_request)
+      ? prepared.transaction_request
+      : prepared;
+  return {
+    evidence,
+    prepared,
+    request,
+    from: normalizeAddress(request.from || evidence.from || prepared.from),
+    to: normalizeAddress(request.to || evidence.to || prepared.to),
+    data: stringValue(request.data || request.calldata || evidence.data || evidence.calldata),
+    value: stringValue(request.value || evidence.value || prepared.value || '0'),
+    quoteId: stringValue(evidence.quote_id || result.quote_id || prepared.quote_id),
+    chainId: stringValue(
+      evidence.chain_id || request.chain_id || request.chainId || prepared.chain_id
+    ),
+    simulation: isObject(evidence.simulation) ? evidence.simulation : {},
+    simulationId: stringValue(evidence.simulation_id || prepared.simulation_id),
+  };
+}
+
+function isHexData(value) {
+  return /^0x[0-9a-fA-F]+$/.test(stringValue(value));
+}
+
+function isUintLike(value) {
+  const text = stringValue(value);
+  return !text || /^[0-9]+$/.test(text) || /^0x[0-9a-fA-F]+$/.test(text);
+}
+
+function simulationStatus(value = {}) {
+  return stringValue(
+    value.evidence.simulation_status ||
+      value.simulation.status ||
+      value.simulation.result ||
+      value.prepared.simulation_status
+  ).toLowerCase();
+}
+
+function simulationError(value = {}) {
+  return (
+    value.evidence.err ||
+    value.evidence.error ||
+    value.simulation.err ||
+    value.simulation.error ||
+    null
+  );
+}
+
+function simulationSucceeded(status) {
+  return ['ok', 'success', 'succeeded', 'passed', 'simulated'].includes(status);
 }
 
 export function isEthereumTxHash(value) {
@@ -214,6 +279,13 @@ export function buildEthereumSwapTask(input = {}) {
     `ethereum-${adapter || 'swap'}-${String(input.taskId || input.task_id || Date.now()).slice(-18)}`;
   const maxInputAmount = numericString(input.maxInputAmount || input.max_input_amount || amount);
   const minOutputAmount = numericString(input.minOutputAmount || input.min_output_amount);
+  const maxNotionalUsd = positiveNumericString(
+    input.maxNotionalUsd ||
+      input.max_notional_usd ||
+      input.max_quote_amount ||
+      input.quoteBudget ||
+      input.quote_budget
+  );
 
   const params = {
     account: scope.account_ref,
@@ -258,7 +330,16 @@ export function buildEthereumSwapTask(input = {}) {
           amount,
           slippageBps,
           quote_id: quoteId,
-          transaction_format: 'external_agent_built',
+          transaction_format: ETHEREUM_TRANSACTION_REQUEST_FORMAT,
+          signing_handoff:
+            input.signingHandoff || input.signing_handoff || 'external_agent_ows_safe_or_wallet',
+          prepared_result_required: true,
+          prepared_transaction_schema: {
+            from: scope.account_ref,
+            to: 'router_or_smart_account_module',
+            data: '0x...',
+            simulation_required: true,
+          },
           simulated: Boolean(input.simulated),
         },
       },
@@ -268,6 +349,9 @@ export function buildEthereumSwapTask(input = {}) {
         idempotency_key: quoteId,
         require_receipt: true,
         require_simulation: true,
+        require_prepared_transaction: true,
+        require_quote_id: true,
+        max_notional_usd: maxNotionalUsd,
         max_input_amount: maxInputAmount,
         min_output_amount: minOutputAmount,
         slippage_bps: slippageBps,
@@ -320,6 +404,16 @@ export function validateEthereumSwapTask(task = {}) {
     ),
   });
   if (swapParams.status !== 'ok') return swapParams;
+  if (
+    params.transaction_format &&
+    params.transaction_format !== ETHEREUM_TRANSACTION_REQUEST_FORMAT
+  ) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_TRANSACTION_FORMAT_INVALID',
+      message: `Ethereum submit_tx task requires transaction_format=${ETHEREUM_TRANSACTION_REQUEST_FORMAT}.`,
+    };
+  }
   return { status: 'ok' };
 }
 
@@ -391,6 +485,9 @@ export function verifyEthereumAgentTaskResult(result = {}, task = {}) {
     };
   }
   const evidence = isObject(result.evidence) ? result.evidence : {};
+  if (result.status === 'proposed') {
+    return verifyEthereumPreparedTransactionResult(result, task);
+  }
   const txHash = ethereumTxHashFromResult(result);
   if (['submitted', 'done'].includes(result.status) && !isEthereumTxHash(txHash)) {
     return {
@@ -439,4 +536,118 @@ export function verifyEthereumAgentTaskResult(result = {}, task = {}) {
     };
   }
   return { status: 'ok' };
+}
+
+export function verifyEthereumPreparedTransactionResult(result = {}, task = {}) {
+  const taskCheck = validateEthereumSwapTask(task);
+  if (taskCheck.status !== 'ok') return taskCheck;
+  const prepared = ethereumPreparedTransactionEvidence(result);
+  if (prepared.evidence.venue_id && prepared.evidence.venue_id !== ETHEREUM_VENUE_ID) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_RESULT_VENUE_MISMATCH',
+      message: 'Ethereum prepared transaction evidence must have venue_id=ethereum-mainnet.',
+    };
+  }
+  if (prepared.chainId && prepared.chainId !== ETHEREUM_CHAIN_ID) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_RESULT_CHAIN_MISMATCH',
+      message: 'Ethereum prepared transaction evidence must have chain_id=eip155:1.',
+    };
+  }
+  const expectedQuoteId = ethereumQuoteIdFromTask(task);
+  if (!prepared.quoteId) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_QUOTE_ID_REQUIRED',
+      message: 'Ethereum proposed transaction requires quote_id evidence.',
+    };
+  }
+  if (expectedQuoteId && prepared.quoteId !== expectedQuoteId) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_QUOTE_ID_MISMATCH',
+      message: 'Ethereum prepared transaction quote_id does not match the dispatched task.',
+      expected_quote_id: expectedQuoteId,
+      actual_quote_id: prepared.quoteId,
+    };
+  }
+  const account = ethereumAccountFromTask(task);
+  if (!ETHEREUM_ADDRESS_RE.test(prepared.from)) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_FROM_ADDRESS_REQUIRED',
+      message: 'Ethereum proposed transaction requires transaction_request.from.',
+    };
+  }
+  if (prepared.from !== account) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_FROM_ADDRESS_MISMATCH',
+      message: 'Ethereum proposed transaction from address must match the task account.',
+      expected_from: account,
+      actual_from: prepared.from,
+    };
+  }
+  if (!ETHEREUM_ADDRESS_RE.test(prepared.to)) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_TO_ADDRESS_REQUIRED',
+      message: 'Ethereum proposed transaction requires a valid transaction_request.to.',
+    };
+  }
+  if (!isHexData(prepared.data)) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_CALLDATA_REQUIRED',
+      message: 'Ethereum proposed transaction requires non-empty hex calldata.',
+    };
+  }
+  if (!isUintLike(prepared.value)) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_VALUE_INVALID',
+      message: 'Ethereum proposed transaction value must be a decimal or hex unsigned integer.',
+    };
+  }
+  const simErr = simulationError(prepared);
+  if (simErr) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_SIMULATION_FAILED',
+      message: 'Ethereum proposed transaction simulation returned an error.',
+      simulation_error: simErr,
+    };
+  }
+  const simStatus = simulationStatus(prepared);
+  if (!prepared.simulationId && !simStatus) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_SIMULATION_EVIDENCE_REQUIRED',
+      message:
+        'Ethereum proposed transaction requires simulation_id or successful simulation status.',
+    };
+  }
+  if (simStatus && !simulationSucceeded(simStatus)) {
+    return {
+      status: 'error',
+      code: 'ETHEREUM_SIMULATION_FAILED',
+      message: 'Ethereum proposed transaction simulation status is not successful.',
+      simulation_status: simStatus,
+    };
+  }
+  return {
+    status: 'ok',
+    prepared_transaction: {
+      venue_id: ETHEREUM_VENUE_ID,
+      chain_id: ETHEREUM_CHAIN_ID,
+      quote_id: prepared.quoteId,
+      from: prepared.from,
+      to: prepared.to,
+      transaction_format: ETHEREUM_TRANSACTION_REQUEST_FORMAT,
+      simulation_id: prepared.simulationId || null,
+      simulation_status: simStatus || null,
+    },
+  };
 }
