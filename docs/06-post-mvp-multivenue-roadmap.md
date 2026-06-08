@@ -292,8 +292,9 @@ OKX is the first exchange target. CEX adapters are useful but have weaker enforc
 
 Current implementation status: OKX has read-only balance request signing/normalization and a
 `place_order` AgentTask/result verifier plus order-status adapter, local permission/IP allowlist
-proof gate, local daemon dispatch-ready override and daemon receipt verifier skeleton. It is still
-not globally dispatch-ready in the Worker registry; stronger venue-side proof hardening and UI
+proof gate, local rotation proof, signed live-read credential proof, local daemon dispatch-ready
+override and daemon receipt verifier skeleton. It is still not globally dispatch-ready in the Worker
+registry; complete permission enumeration, live key revoke, live venue rotation and production UI
 wiring remain pending.
 
 Default safety model:
@@ -524,25 +525,28 @@ Sui Testnet only. No change to current MVP.
 ### Stage 2 - OKX Exchange Adapter
 
 - OKX read-only account and balance adapter is started; order-status request signing and normalization are started.
-- OKX `place_order` AgentTask schema, `clOrdId` idempotency, local permission/IP allowlist proof gate, local dispatch-ready override, result/status verifier, daemon receipt verifier and bounded retry/backoff are started; production trade adapter still needs venue-side proof hardening and UI wiring.
+- OKX `place_order` AgentTask schema, `clOrdId` idempotency, local permission/IP allowlist/rotation proof gate, signed live-read proof, local dispatch-ready override, result/status verifier, daemon receipt verifier and bounded retry/backoff are started; production trade adapter still needs complete permission enumeration, live key revoke, live venue rotation and UI wiring.
 - Subaccount-first setup UX.
 - No autonomous withdrawals.
 
 ### Stage 3 - Solana, Ethereum and Hyperliquid Adapters
 
 - Solana delegated/Raydium or Jupiter adapter. Current code has read-only inventory plus a swap
-  `submit_tx` AgentTask/result verifier skeleton with quote id/signature evidence checks,
-  env-account local dispatch-ready gate and mock-tested `getSignatureStatuses` receipt polling;
-  it also has non-signing signer/address probe; still needs transaction build/simulation, OWS
-  account discovery, real signature probing, signing handoff
-  and live-account dry-runs.
+  `submit_tx` AgentTask/result verifier skeleton with quote id, prepared unsigned transaction,
+  simulation and signature evidence checks, env-or-OWS-account local dispatch-ready gate and
+  mock-tested `getSignatureStatuses` receipt polling with bounded JSON-RPC retry/backoff. It also
+  has non-signing signer/address probe and a mock-tested Jupiter quote/swap unsigned transaction builder exposed through
+  `sentry-daemon solana prepare-swap`, plus local signer command handoff for accepted `proposed`
+  unsigned transactions; it still needs OWS signing/API-token handoff, Raydium/Orca builders, real
+  signature probing and live-account dry-runs.
 - Ethereum Safe/account-abstraction and Uniswap adapter. Current code has read-only inventory plus a
-  swap `submit_tx` AgentTask/result verifier skeleton with quote id, chain id and EVM tx-hash
-  evidence checks, env-account local dispatch-ready gate plus mock-tested
-  `eth_getTransactionReceipt` polling; it also has non-signing signer/address probe; still needs
-  Safe/session-key grant installation, account discovery, real signature probing, calldata
-  construction, simulation/signing handoff and live-account
-  dry-runs.
+  swap `submit_tx` AgentTask/result verifier skeleton with quote id, chain id, prepared EVM
+  transaction request, simulation and EVM tx-hash evidence checks, env-or-OWS-account local
+  dispatch-ready gate plus mock-tested `eth_getTransactionReceipt` polling with bounded JSON-RPC
+  retry/backoff. It also has non-signing signer/address probe and a mock-tested Uniswap V3 `exactInputSingle` calldata builder exposed
+  through `sentry-daemon ethereum prepare-swap`, plus local signer command handoff for accepted
+  `proposed` transaction requests; it still needs Safe/session-key grant installation, OWS
+  signing/API-token handoff, real signature probing and live-account dry-runs.
 - Hyperliquid API wallet / agent wallet, subaccount/vault scope and nonce/idempotency adapter. Task/result schema, local dispatch-ready gate, local agent-wallet grant metadata proof, public `userRole` live grant check, pre-signed `/exchange` submit adapter, default local nonce store, `cloid` verifier and public `orderStatus` receipt verifier are started; UI wiring, live-account dry-runs and live submit verification remain.
 - Chain/venue-specific policy enforcement feasibility notes.
 - Custom Solidity/Anchor only after proving native delegation or account modules cannot satisfy Sentry constraints.

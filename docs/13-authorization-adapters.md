@@ -20,7 +20,13 @@ Sentry 需要一个显式的 `AuthorizationAdapter` 层:
 2. 这些机制无法表达预算、范围、过期、撤销或审计时,再写 Sentry 自己的合约/program。
 3. OWS-only 可以用于本地 MVP、观察、低风险自用或人工确认流,但不能对外宣称"链上强约束"。
 
-当前实现状态:`core/authorization.js` 已提供共享 registry skeleton 和 AgentTask preflight 校验,并被 Worker `/api/authorization/registry` 与 daemon `authorization.registry` / `authorization.validate` command 复用。它只处理授权元数据、capability scope 和 claim conformance,不保存或读取任何 secret。
+当前实现状态:`core/authorization.js` 已提供共享 registry skeleton、AgentTask preflight 校验和
+metadata-only authorization state snapshot,并被 Worker `/api/authorization/registry` 与 daemon
+`authorization.registry` / `authorization.validate` / `authorization.state` command 复用。daemon 还提供
+online-only `authorization.revoke` 作为本地 metadata safety stop:它可以把 OKX/Hyperliquid key handle
+或 OWS wallet ref 标记为本地 revoked,阻断后续本地 dispatch readiness。它只处理授权元数据、capability
+scope、claim conformance 和本地 grant/read/revoke 可见状态,不保存或读取任何 secret,也不会创建或证明撤销了真实
+venue/chain 授权。
 
 ## 2. 授权模型
 
@@ -100,8 +106,14 @@ type ConstraintSupport = {
 当前代码状态:OKX 已有 read-only adapter、`place_order` AgentTask/result verifier、local
 permission/IP allowlist metadata proof gate、order-status adapter 和 daemon dispatch receipt verifier
 skeleton。daemon 可以在本机 metadata、IP allowlist 和 env/keychain 凭据都通过后,为当前 OKX
-task 传入 `dispatch_ready_source='local_daemon'`;但这仍只是 venue-enforced task/status schema +
-local attestation,不是链上强约束,也不代表 Worker 全局 registry 已把 OKX 标为 ready。
+task 传入 `dispatch_ready_source='local_daemon'`;在 dispatch 路径上还可以默认执行一次 signed
+OKX balance read,用 sanitized `live_read_proof` 证明该 key 当前能被 OKX 接受为 signed read。
+但这仍只是 venue-enforced task/status schema + local credential-auth proof,不是完整 OKX
+permission export、不是链上强约束,也不代表 Worker 全局 registry 已把 OKX 标为 ready。
+`authorization.state` 可以读取 OKX metadata key handle、read scope、withdraw absence、IP allowlist
+状态和本地 `rotation_state`,返回 `metadata_ready` / `partial` / `blocked` 等状态。过期 rotation
+metadata 会阻断 dispatch,临近到期会成为 warning;但它不会读取 raw API secret 或调用 OKX 创建/撤销/
+轮换 key。
 
 Hyperliquid 已有 read-only `info` adapter、`place_order` AgentTask/result verifier skeleton、
 local dispatch-readiness gate、local agent-wallet grant metadata proof、public `userRole` live grant
@@ -115,26 +127,45 @@ evidence,在本机 metadata + read address proof + active agent-wallet grant met
 public `info.userRole` 确认 agent wallet 仍指向预期 master/subaccount;但还没有 daemon 内部签名、
 live submit proof、完整 grant/revoke 管理 UI 或真实账户 dry-run。
 因此 Hyperliquid 也不能进入 Worker 全局 `ready_for_dispatch`。
+`authorization.state` 可以读取 Hyperliquid key handle、master/subaccount read address、agent wallet
+address、本地 grant metadata 和 `rotation_state`,并把缺失 grant/read scope/no-transfer/过期 rotation
+约束暴露成 access issue;它不会替用户创建 agent wallet、签署 exchange action 或完成 live grant
+revoke / live key rotation。
 
 Solana 已有 read-only RPC adapter、swap `submit_tx` AgentTask/result verifier skeleton、
-非签名 signer/address probe 和 `getSignatureStatuses` receipt polling skeleton:它能校验本地 wallet
-address、`read/sign/submit_tx` scope、quote id、mint/amount/slippage 和返回的 transaction signature
-evidence,可在 task owner 匹配 `SENTRY_SOLANA_WALLET_ADDRESS` / `SENTRY_SOLANA_OWNER` 时创建任务级
-local dispatch-ready override,并可用 `SENTRY_SOLANA_SIGNER_ADDRESS` 或
-`SENTRY_SOLANA_SIGNER_PROBE_COMMAND` 做非签名地址证明,再在 dispatch 后通过 RPC 观察 signature
-status;但还没有 native delegation grant/read/revoke、OWS account discovery、真实 signer probing、交易
-构建/仿真、签名 handoff 或真实账户 dry-run。因此 Solana 也不能进入 Worker 全局
+metadata-only OWS wallet references、非签名 signer/address probe 和 `getSignatureStatuses` receipt
+polling skeleton:它能校验本地 wallet address、`read/sign/submit_tx` scope、quote
+id、mint/amount/slippage、待签 unsigned transaction + simulation evidence 和返回的
+transaction signature evidence,可在 task owner 匹配
+`SENTRY_SOLANA_WALLET_ADDRESS` / `SENTRY_SOLANA_OWNER` 或已链接 OWS
+`solana:mainnet:<address>` wallet reference 时创建任务级 local dispatch-ready override,并可用
+`SENTRY_SOLANA_SIGNER_ADDRESS` 或 `SENTRY_SOLANA_SIGNER_PROBE_COMMAND` 做独立的非签名地址证明,
+可通过 `sentry-daemon solana prepare-swap` 调 Jupiter quote/swap 生成待签 unsigned transaction,
+可通过 `SENTRY_SOLANA_SIGNER_COMMAND` 或 `--solana-signer-cmd` 把 accepted `proposed` 结果交给
+本地 signer command,再在 dispatch 后通过 RPC 观察 signature status;但还没有 native delegation
+grant/read/revoke、OWS signing/API token handoff、真实 signer probing、Raydium/Orca transaction
+builder 或真实账户 dry-run。因此 Solana 也不能进入 Worker 全局
 `ready_for_dispatch`。
+`authorization.state` 可以读取 OWS wallet ref 中的 `solana:mainnet` account metadata,确认本地
+`read/sign/submit_tx` capability,并显式返回 `NATIVE_DELEGATION_GRANT_NOT_INSTALLED` planned issue;
+这表示目前只有本地 wallet metadata,还没有 Solana native delegation grant/read/revoke。
 
-Ethereum 已有 read-only RPC adapter、swap `submit_tx` AgentTask/result verifier skeleton、非签名
-signer/address probe 和 `eth_getTransactionReceipt` receipt polling skeleton:它能校验本地
+Ethereum 已有 read-only RPC adapter、swap `submit_tx` AgentTask/result verifier skeleton、
+metadata-only OWS wallet references、非签名 signer/address probe 和 `eth_getTransactionReceipt`
+receipt polling skeleton:它能校验本地
 wallet/smart-account address、`read/sign/submit_tx` scope、quote id、ERC-20 token/amount/slippage 和
-返回的 EVM transaction hash evidence,可在 task account 匹配
-`SENTRY_ETHEREUM_WALLET_ADDRESS` / `SENTRY_ETHEREUM_OWNER` 时创建任务级 local dispatch-ready
-override,并可用 `SENTRY_ETHEREUM_SIGNER_ADDRESS` 或 `SENTRY_ETHEREUM_SIGNER_PROBE_COMMAND` 做非签名
-地址证明,再在 dispatch 后通过 RPC 观察 matching receipt;但还没有 Safe/session-key
-grant/read/revoke、account discovery、真实 signer probing、calldata 构建/仿真、签名 handoff 或真实账户
-dry-run。因此 Ethereum 也不能进入 Worker 全局 `ready_for_dispatch`。
+待签 EVM transaction request + simulation evidence、返回的 EVM transaction hash evidence,可在 task account 匹配
+`SENTRY_ETHEREUM_WALLET_ADDRESS` / `SENTRY_ETHEREUM_OWNER` 或已链接 OWS
+`eip155:1:<address>` wallet reference 时创建任务级 local dispatch-ready override,并可用
+`SENTRY_ETHEREUM_SIGNER_ADDRESS` 或 `SENTRY_ETHEREUM_SIGNER_PROBE_COMMAND` 做独立的非签名
+地址证明,可通过 `sentry-daemon ethereum prepare-swap` 生成 Uniswap V3 exactInputSingle calldata,
+可通过 `SENTRY_ETHEREUM_SIGNER_COMMAND` 或 `--ethereum-signer-cmd` 把 accepted `proposed` 结果交给
+本地 signer command,再在 dispatch 后通过 RPC 观察 matching receipt;但还没有 Safe/session-key
+grant/read/revoke、OWS signing/API token handoff、真实 signer probing 或真实账户 dry-run。因此
+Ethereum 也不能进入 Worker 全局 `ready_for_dispatch`。
+`authorization.state` 可以读取 OWS wallet ref 中的 `eip155:1` account metadata,确认本地
+`read/sign/submit_tx` capability,并显式返回 `SMART_ACCOUNT_GRANT_NOT_INSTALLED` planned issue;这表示
+目前只有本地 wallet metadata,还没有 Safe/session-key/smart-account grant/read/revoke。
 
 ## 5. AuthorizationAdapter 接口
 
@@ -172,6 +203,23 @@ interface AuthorizationAdapter {
   readState(ref: AuthorizationRef): Promise<AuthorizationState>;
 }
 ```
+
+当前代码没有逐 venue class 形式的 adapter 实例,而是先落成共享函数
+`buildAuthorizationStateSnapshot({ secretStore, walletStore, scope })`:daemon `authorization.state`
+加载本机 `~/.sentry/venues.json` 和 `~/.sentry/wallets.json`,返回 sanitized state snapshot 给 Worker /
+Dashboard。这个 read-state surface 是为了让前端和 operator 看清楚"已有 metadata / 还缺 grant /
+能否撤销",不是 grant builder,也不是 production dispatch enablement。
+
+daemon `authorization.revoke` 目前只做本地 metadata revoke:OKX/Hyperliquid key handle 会被标记
+`status='revoked'` 并移除 trade permissions;Hyperliquid agent-wallet grant metadata 同步标记 revoked;
+OWS wallet ref 会被标记 `status='revoked'` 并移除 `sign/submit_tx` capability。这会让后续
+`authorization.state` 和 local dispatch readiness 变成 blocked,但结果必须返回
+`live_authority_revoked=false`。真实 OKX key revoke、Hyperliquid agent-wallet revoke、Solana
+delegation revoke 或 Ethereum Safe/session-key revoke 仍是后续 per-venue adapter 工作。
+
+daemon `venue rotate --confirm` 只更新本地 key metadata 的 `rotated_at` / `rotation_reason`,用于
+让 `authorization.state` 和 dispatch readiness 计算 rotation proof。它必须在 operator 已经于 OKX /
+Hyperliquid 外部完成真实 key material 轮换后使用;当前没有 live venue rotation API。
 
 Rules:
 

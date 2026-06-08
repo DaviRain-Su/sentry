@@ -1,7 +1,7 @@
 # Local Agent, CLI, Agent Dispatch, and Worker Bridge v0.1
 
 状态：Planning
-日期：2026-06-03 · 更新：2026-06-03
+日期：2026-06-03 · 更新：2026-06-04
 范围：Sentry 守护程序 CLI、Agent 调度协议、Cloudflare Worker relay/control plane 的连接设计
 
 ## 1. 结论
@@ -182,15 +182,17 @@ CLI
   -> generate or load local agent identity key
   -> POST /api/local-agents/pair
        pairing_code
+       agent_id
        agent_public_key
        device_name
        supported_capabilities
+       pairing_proof_issued_at
        signed_nonce
   <- agent_id, websocket_url, relay_token, relay_token_expires_at
 
 Daemon
   -> connect websocket_url with relay_token
-  -> send hello envelope signed by agent_private_key
+  -> send hello envelope signed by relay-token-bound HMAC + daemon Ed25519 identity signature
   <- session_accepted
 ```
 
@@ -199,15 +201,49 @@ Rules:
 - pairing code expires quickly, recommended 5 minutes.
 - pairing code is single-use.
 - `owner_control_token` is short-lived and belongs to the Dashboard/session side for command submission until real user auth replaces it.
-- daemon generates a local Ed25519 identity key and stores it in OS keychain or `~/.sentry/identity` with 600 permissions.
+- daemon generates or loads a local Ed25519 identity key and stores it in `~/.sentry/identity.json`
+  with 600 permissions. The current implementation uses this key to sign the pairing proof.
 - Worker stores only public key and metadata.
 - `relay_token` is short-lived and belongs only to the daemon WebSocket connection; it must not be shown to or stored by the browser.
-- token refresh should eventually use a signed Worker challenge from the daemon identity key.
+- token refresh uses a signed Worker challenge from the daemon identity key: daemon requests a
+  challenge, signs it with the local Ed25519 identity, Worker verifies the stored public key, rotates
+  the short-lived relay token, closes the old WebSocket and lets daemon reconnect.
 - User can revoke a paired agent from Dashboard; daemon should observe `session_revoked` and stop remote control.
 
 ## 5. Message protocol
 
-所有 WebSocket messages 使用 signed JSON envelope。
+WebSocket messages use a signed JSON envelope. The implemented v0 signature is relay-token-bound
+HMAC-SHA256: both sides derive `sha256(relay_token)` and sign bridge envelopes. AgentSession
+verifies daemon `hello`, `heartbeat`, `agent.status` and `command_result` messages before mutating
+session state; the daemon verifies Worker `session_accepted`, `session_revoked` and `command`
+messages before acting on them. The daemon sends the relay token through
+`Sec-WebSocket-Protocol: sentry-rt.<token>` by default; query-string `token` remains only as a
+compatibility fallback.
+
+Long-lived daemon Ed25519 identity now exists for pairing proof and Worker-side device public-key
+binding. The same identity signs relay-token refresh challenges and daemon-origin WebSocket business
+envelopes. For paired sessions, AgentSession requires daemon-origin envelopes to include
+`agent_public_key_id`, `agent_signature_alg: "Ed25519"` and `agent_signature` over the canonical
+bridge payload, in addition to the relay-token-bound HMAC. AgentSession also persists a Worker
+bridge Ed25519 identity, includes the Worker public key metadata in the signed `session_accepted`
+envelope, and signs Worker-origin messages with `worker_public_key_id`,
+`worker_signature_alg: "Ed25519"` and `worker_signature`. The daemon caches that Worker key after
+`session_accepted` and rejects later Worker-origin messages if the key id or signature does not
+match.
+Replay protection is currently relay-session scoped: each side adds a positive monotonic `seq` to
+signed envelopes and rejects missing, repeated or lower sequence numbers for the same relay token.
+Worker sequence state is stored in the AgentSession Durable Object; daemon sequence state is stored
+locally in `~/.sentry/bridge-sequences.json` under a derived relay-token key, not under the raw relay
+token or HMAC key. Both sides also reject envelopes whose `issued_at` is stale or too far in the
+future. Worker `command` envelopes must include `expires_at`; the daemon blocks expired commands
+before dispatch and returns a `command_result` error for Dashboard polling. AgentSession keeps a
+bounded pending queue for low-risk read/status commands when daemon is offline and replays them on
+reconnect; dispatch/control commands still fail fast instead of being replayed. If reconnect happens
+after `command_ack` but before `command_result`, AgentSession sends an internal `command.resume`
+probe for the acknowledged command. The daemon answers from its bounded local
+`~/.sentry/command-results.json` cache when it has already produced a result, returns `pending` if
+the original command is still in-flight in the daemon process, or finalizes the original command as
+`COMMAND_RESUME_NOT_FOUND` without replaying it when no stored result exists.
 
 ```ts
 type BridgeEnvelope = {
@@ -230,17 +266,38 @@ type BridgeEnvelope = {
   expires_at?: string;
   idempotency_key?: string;
   payload: unknown;
-  signature: string;
+  agent_public_key_id?: string; // daemon-origin: paired Ed25519 key id
+  agent_signature_alg?: 'Ed25519'; // daemon-origin
+  agent_signature?: string; // daemon-origin: Ed25519 over canonical envelope without signature fields
+  worker_public_key_id?: string; // Worker-origin: AgentSession bridge key id
+  worker_signature_alg?: 'Ed25519'; // Worker-origin
+  worker_signature?: string; // Worker-origin: Ed25519 over canonical envelope without signature fields
+  signature: string; // v0: HMAC-SHA256 over canonical envelope without signature fields
 };
 ```
 
 Requirements:
 
 - `message_id` is unique.
-- `seq` is monotonic per session.
+- `seq` is monotonic per relay session.
 - `issued_at` must be close to Worker time; tolerate small clock drift.
-- command messages must include `expires_at`.
+- stale or far-future `issued_at` values must be rejected before command/session side effects.
+- command messages must include `expires_at`, and expired commands must be blocked before dispatch.
 - command result must include original `message_id` / `idempotency_key`.
+- command submit must deduplicate caller-provided `idempotency_key`: same key + same command type
+  returns the existing safe command record; same key + different command type returns
+  `IDEMPOTENCY_KEY_CONFLICT`.
+- command records must persist the lifecycle: `queued` when created/sent, `acknowledged` when
+  `command_ack` arrives, and `result` for terminal daemon result, expiry or ack timeout.
+- sent commands without timely `command_ack` must terminate as `COMMAND_ACK_TIMEOUT` so Dashboard
+  does not mistake an unreceived high-risk command for an in-flight dispatch.
+- acknowledged commands that reconnect before `command_result` must use `command.resume` lookup
+  semantics. Resume may return a stored result or explicit `COMMAND_RESUME_NOT_FOUND`; it must not
+  replay `agent.dispatch`, policy control or other high-risk commands.
+- Worker must reject unsigned or tampered daemon envelopes before mutating session state.
+- daemon must reject unsigned or tampered Worker command/session envelopes before executing a
+  command or treating the session as accepted/revoked.
+- both sides must reject missing, repeated or lower `seq` values for the same relay session.
 - messages must not include OWS token, wallet passphrase, private key, exchange raw API secret or full local DB rows.
 
 ## 5a. Agent Dispatch Protocol（守护程序 → 外部 Agent）
@@ -252,11 +309,22 @@ Requirements:
 守护程序维护一个 Agent registry。用户通过 CLI 注册可用的外部 Agent：
 
 ```bash
-sentry-daemon agent register claude-code --command "claude-code"
-sentry-daemon agent register codex --command "codex"
-sentry-daemon agent register kimi --command "kimi"
+sentry-daemon agent register claude-code --command "claude-code" \
+  --task-capabilities okx:place_order,hyperliquid:place_order,solana-mainnet:submit_tx,ethereum-mainnet:submit_tx
+sentry-daemon agent register codex --command "codex" \
+  --task-capabilities okx:place_order,hyperliquid:place_order,solana-mainnet:submit_tx,ethereum-mainnet:submit_tx
+sentry-daemon agent register kimi --command "kimi" \
+  --task-capabilities okx:place_order,hyperliquid:place_order
 sentry-daemon agent list
 ```
+
+`task_capabilities` 是本地 Agent capability manifest 的第一版。格式是
+`<venue_id>:<action_type>`，例如 `okx:place_order`、`hyperliquid:place_order`、
+`solana-mainnet:submit_tx`、`ethereum-mainnet:submit_tx`。守护程序在
+`policy.local.run_once dispatch=true` 和 remote `agent.dispatch` 中会先检查目标任务是否被
+注册 Agent 明确声明支持；不匹配时返回 `AGENT_TASK_CAPABILITY_DENIED`，不会进入 readiness
+或 spawn 外部进程。`agent.probe` 会展示这些声明，但 `--version` 探测仍只是命令可用性证明，
+不是实际交易执行证明。
 
 每个注册的 Agent 声明其能力：
 
@@ -386,23 +454,28 @@ type RemoteCommand =
   | { type: 'agent.stop' }
   | { type: 'agent.registry' }
   | { type: 'agent.probe'; agent_id?: string; timeout_ms?: number }
-  | { type: 'agent.dispatch'; task: AgentTask; target_agent?: string; command?: string; timeout_ms?: number; verify_live_grant?: boolean; require_signer_probe?: boolean; signer_probe_timeout_ms?: number }
+  | { type: 'agent.dispatch'; task: AgentTask; target_agent?: string; command?: string; timeout_ms?: number; verify_live_grant?: boolean; verify_okx_live_read?: boolean; require_signer_probe?: boolean; signer_probe_timeout_ms?: number }
   | { type: 'venue.catalog' }
   | { type: 'authorization.registry' }
+  | { type: 'authorization.revoke'; authorization_ref?: string; venue_id?: string; key_handle?: string; wallet_id?: string; reason?: string; confirm: true }
+  | { type: 'authorization.rotate'; authorization_ref?: string; venue_id?: string; key_handle?: string; rotated_at?: string; reason?: string; confirm: true }
+  | { type: 'authorization.state'; scope?: string[] }
   | { type: 'authorization.validate'; task: AgentTask }
   | { type: 'secret.store' }
+  | { type: 'wallet.refs' }
   | { type: 'inventory.adapters' }
   | { type: 'inventory.sync'; scope?: string[]; live?: boolean; okx_ccy?: string; simulated?: boolean }
   | { type: 'signer.probe'; scope?: string[]; timeout_ms?: number }
   | { type: 'activity.tail'; limit?: number }
+  | { type: 'policy.local.add'; policy?: object }
   | { type: 'policy.local.list' }
   | { type: 'policy.local.tick'; limit?: number; mark?: boolean }
   | { type: 'policy.local.plan'; limit?: number; simulated?: boolean }
-  | { type: 'policy.local.run_once'; limit?: number; check_readiness?: boolean; dispatch?: boolean; mark?: boolean; timeout_ms?: number; verify_receipt?: boolean; simulated?: boolean }
+  | { type: 'policy.local.run_once'; limit?: number; check_readiness?: boolean; check_inventory?: boolean; live_inventory?: boolean; live_market?: boolean; dispatch?: boolean; mark?: boolean; timeout_ms?: number; verify_receipt?: boolean; verify_live_grant?: boolean; verify_okx_live_read?: boolean; simulated?: boolean; market_snapshot?: object; market_venues?: string[]; market_symbols?: string[] }
   | { type: 'policy.local.loop.status' }
-  | { type: 'policy.local.loop.start'; interval_ms?: number; limit?: number; check_readiness?: boolean; dispatch?: boolean; mark?: boolean; run_immediately?: boolean }
+  | { type: 'policy.local.loop.start'; interval_ms?: number; limit?: number; check_readiness?: boolean; check_inventory?: boolean; live_inventory?: boolean; live_market?: boolean; dispatch?: boolean; mark?: boolean; verify_okx_live_read?: boolean; run_immediately?: boolean; market_snapshot?: object; market_venues?: string[]; market_symbols?: string[] }
   | { type: 'policy.local.loop.stop'; reason?: string }
-  | { type: 'policy.local.loop.run_now'; limit?: number; check_readiness?: boolean; dispatch?: boolean; mark?: boolean }
+  | { type: 'policy.local.loop.run_now'; limit?: number; check_readiness?: boolean; check_inventory?: boolean; live_inventory?: boolean; live_market?: boolean; dispatch?: boolean; mark?: boolean; verify_okx_live_read?: boolean; market_snapshot?: object; market_venues?: string[]; market_symbols?: string[] }
   | { type: 'policy.preview'; strategy: StructuredStrategy }
   | { type: 'policy.deploy'; strategy_hash: string; policy_ref: string }
   | { type: 'policy.pause'; policy_id: string }
@@ -434,19 +507,61 @@ External Agent rules:
 - External Agent stdout/stderr is treated as untrusted output and must be size-bounded before relay.
 - External Agent cannot receive OWS token, wallet passphrase, exchange raw API secret or local DB rows over stdio.
 - Worker may request `agent.registry`; daemon returns local registered Agent metadata but does not allow remote registry writes.
-- Worker may request `agent.probe`; daemon runs bounded local `--version` probes against registered Agent commands and checks declared baseline capabilities. This is command availability proof, not execution proof.
+- Worker may request `agent.probe`; daemon runs bounded local `--version` probes against registered Agent commands and checks declared baseline plus task-level venue/action capabilities. This is command availability and manifest proof, not execution proof.
 - Worker may request `agent.dispatch`; daemon validates AgentTask authorization before spawn, resolves `target_agent` from the local registry, writes sanitized task JSON to stdin, parses the final JSON result line from stdout and returns only sanitized result metadata.
-- OKX `place_order` AgentTasks have a schema/result verifier skeleton plus a daemon local dispatch-readiness gate, order-status adapter, bounded retry/backoff and dispatch receipt verifier. Before spawning an OKX external Agent, daemon `agent.dispatch` checks linked local key metadata, `read` + `place_order`, no `withdraw`, `ip_allowlist=true` and local env/keychain credential resolution. When the external Agent returns `submitted` / `done`, daemon checks order status by `ordId` / `clOrdId` and returns sanitized `receipt_verification` metadata unless `verify_receipt=false` is explicitly set. The Worker registry must still keep OKX out of global `ready_for_dispatch`; production UI wiring and stronger venue-side proof hardening remain pending.
-- Hyperliquid `place_order` AgentTasks have a schema/result verifier skeleton plus a local dispatch-readiness gate, local agent-wallet grant metadata proof, public `userRole` live grant checker, pre-signed `/exchange` submit adapter, default local nonce store, public `orderStatus` adapter and daemon dispatch receipt verifier. Before spawning a Hyperliquid external Agent, daemon `agent.dispatch` checks linked local metadata, `read` + `place_order`, no `withdraw` / `transfer`, a real master/subaccount read address, active agent-wallet grant metadata, and by default public `info.userRole` evidence that the agent wallet is still linked to the expected master/subaccount. It can validate task shape, reject mismatched `cloid`, `coin`, `venue_id` or missing order evidence, submit an external Agent's pre-signed payload without seeing private keys, persist `authorization_ref + nonce` claims by default with `SENTRY_HYPERLIQUID_NONCE_STORE` / `--hyperliquid-nonce-store` as overrides, and enrich accepted results with sanitized order state after dispatch. `verify_live_grant=false` exists only for offline tests/demos. It does not yet sign exchange actions itself or run live submit verification. Hyperliquid must therefore stay outside global `ready_for_dispatch`.
-- Solana swap AgentTasks have a `submit_tx` schema/result verifier skeleton. Before spawning a Solana external Agent, daemon `agent.dispatch` can create a task-local dispatch-ready override only when the task owner matches `SENTRY_SOLANA_WALLET_ADDRESS` / `SENTRY_SOLANA_OWNER` and the task requires `read/sign/submit_tx`. `signer.probe` and `require_signer_probe=true` can add non-signing local address proof through `SENTRY_SOLANA_SIGNER_ADDRESS` or `SENTRY_SOLANA_SIGNER_PROBE_COMMAND`. The daemon can validate swap task shape and returned transaction signature / quote id / venue evidence, then poll Solana `getSignatureStatuses` and attach sanitized receipt verification metadata. It still does not build transactions, run simulation, sign, submit, perform real signature probing or discover OWS accounts. Solana must therefore stay outside global `ready_for_dispatch`.
-- Ethereum swap AgentTasks have a `submit_tx` schema/result verifier skeleton. Before spawning an Ethereum external Agent, daemon `agent.dispatch` can create a task-local dispatch-ready override only when the task account matches `SENTRY_ETHEREUM_WALLET_ADDRESS` / `SENTRY_ETHEREUM_OWNER` and the task requires `read/sign/submit_tx`. `signer.probe` and `require_signer_probe=true` can add non-signing local address proof through `SENTRY_ETHEREUM_SIGNER_ADDRESS` or `SENTRY_ETHEREUM_SIGNER_PROBE_COMMAND`. The daemon can validate swap task shape and returned transaction hash / quote id / venue / chain evidence, then poll `eth_getTransactionReceipt` and attach sanitized receipt verification metadata. It still does not install Safe/session-key grants, build calldata, simulate, sign, submit, perform real signature probing or discover OWS accounts. Ethereum must therefore stay outside global `ready_for_dispatch`.
+- Worker may request `wallet.refs`; daemon returns metadata-only OWS wallet references (wallet id, vault path, CAIP-10 accounts, policy ids and capabilities). It must never return OWS API tokens, passphrases, private keys, seeds or mnemonics.
+- OKX `place_order` AgentTasks have a schema/result verifier skeleton plus a daemon local dispatch-readiness gate, signed live-read proof, order-status adapter, bounded retry/backoff and dispatch receipt verifier. Before spawning an OKX external Agent, daemon `agent.dispatch` checks linked local key metadata, `read` + `place_order`, no `withdraw`, `ip_allowlist=true`, non-expired local rotation metadata, local env/keychain credential resolution and, by default, a signed OKX balance-read proof that returns only sanitized `live_read_proof` metadata. `verify_okx_live_read=false` exists only for offline tests/demos. When the external Agent returns `submitted` / `done`, daemon checks order status by `ordId` / `clOrdId` and returns sanitized `receipt_verification` metadata unless `verify_receipt=false` is explicitly set. The Worker registry must still keep OKX out of global `ready_for_dispatch`; production UI wiring, complete permission enumeration, live key revoke and live venue rotation remain pending.
+- Hyperliquid `place_order` AgentTasks have a schema/result verifier skeleton plus a local dispatch-readiness gate, local agent-wallet grant metadata proof, public `userRole` live grant checker, pre-signed `/exchange` submit adapter, default local nonce store, public `orderStatus` adapter and daemon dispatch receipt verifier. Before spawning a Hyperliquid external Agent, daemon `agent.dispatch` checks linked local metadata, `read` + `place_order`, no `withdraw` / `transfer`, non-expired local rotation metadata, a real master/subaccount read address, active agent-wallet grant metadata, and by default public `info.userRole` evidence that the agent wallet is still linked to the expected master/subaccount. It can validate task shape, reject mismatched `cloid`, `coin`, `venue_id` or missing order evidence, submit an external Agent's pre-signed payload without seeing private keys, persist `authorization_ref + nonce` claims by default with `SENTRY_HYPERLIQUID_NONCE_STORE` / `--hyperliquid-nonce-store` as overrides, and enrich accepted results with sanitized order state after dispatch. `verify_live_grant=false` exists only for offline tests/demos. It does not yet sign exchange actions itself or run live submit verification. Hyperliquid must therefore stay outside global `ready_for_dispatch`.
+- Solana swap AgentTasks have a `submit_tx` schema/result verifier skeleton. Before spawning a Solana external Agent, daemon `agent.dispatch` can create a task-local dispatch-ready override when the task owner matches either `SENTRY_SOLANA_WALLET_ADDRESS` / `SENTRY_SOLANA_OWNER` or a linked OWS `solana:mainnet:<address>` wallet reference, and the task requires `read/sign/submit_tx`. `signer.probe` and `require_signer_probe=true` can add separate non-signing local address proof through `SENTRY_SOLANA_SIGNER_ADDRESS` or `SENTRY_SOLANA_SIGNER_PROBE_COMMAND`. The daemon can validate swap task shape, Jupiter unsigned transaction proposals from `sentry-daemon solana prepare-swap`, returned transaction signature / quote id / venue evidence, then poll Solana `getSignatureStatuses` with bounded JSON-RPC retry/backoff and attach sanitized receipt verification metadata plus retry summaries. It still does not sign, submit, perform real signature probing or pass OWS API tokens to Agents. Solana must therefore stay outside global `ready_for_dispatch`.
+- Ethereum swap AgentTasks have a `submit_tx` schema/result verifier skeleton. Before spawning an Ethereum external Agent, daemon `agent.dispatch` can create a task-local dispatch-ready override when the task account matches either `SENTRY_ETHEREUM_WALLET_ADDRESS` / `SENTRY_ETHEREUM_OWNER` or a linked OWS `eip155:1:<address>` wallet reference, and the task requires `read/sign/submit_tx`. `signer.probe` and `require_signer_probe=true` can add separate non-signing local address proof through `SENTRY_ETHEREUM_SIGNER_ADDRESS` or `SENTRY_ETHEREUM_SIGNER_PROBE_COMMAND`. The daemon can validate swap task shape, Uniswap V3 calldata proposals from `sentry-daemon ethereum prepare-swap`, returned transaction hash / quote id / venue / chain evidence, then poll `eth_getTransactionReceipt` with bounded JSON-RPC retry/backoff and attach sanitized receipt verification metadata plus retry summaries. It still does not install Safe/session-key grants, sign, submit, perform real signature probing or pass OWS API tokens to Agents. Ethereum must therefore stay outside global `ready_for_dispatch`.
 - Trading/execution output from an external Agent is only a proposal until Local Agent Guardian and policy checks pass.
 - AgentTask without authorization metadata is rejected before subprocess dispatch.
 - `authorization.validate` is a preflight command only; it cannot grant new authority or import secrets.
-- `secret.store` and `inventory.adapters` return metadata only. They cannot reveal raw venue API secrets or wallet tokens.
-- `inventory.sync` defaults to metadata-only. When `live=true`, OKX/Hyperliquid/Solana/Ethereum read-only adapters may perform local reads, but missing local credentials or wallet address env must return blocked access without falling back to demo data.
+- `authorization.state` is a metadata-only read-state command. The daemon loads local venue key
+  handles and OWS wallet refs, returns sanitized grant/read/revoke status for Solana, Ethereum,
+  Hyperliquid, OKX and Sui demo, and exposes planned grant gaps such as Solana native delegation or
+  Ethereum smart-account/session-key installation. It also returns venue-key `rotation_state`;
+  expired local rotation metadata blocks dispatch, while due-soon metadata is a warning. Each state
+  includes machine-readable `readiness`, and the top-level response includes `readiness_summary`
+  with blocked/planned/metadata-ready target venue ids plus next steps for production UI surfaces. It
+  cannot create grants, revoke live venue keys, rotate live venue keys, sign transactions, read raw
+  API secrets or import wallet credentials.
+- `authorization.revoke` is an online-only local safety stop. It requires `confirm=true`; for
+  OKX/Hyperliquid it marks the local key handle `revoked`, strips trading permissions and marks the
+  Hyperliquid agent-wallet grant revoked in metadata; for OWS wallet refs it marks the wallet ref
+  revoked and strips `sign/submit_tx` capability. It writes sanitized activity and makes later local
+  dispatch readiness fail, but returns `live_authority_revoked=false` because real OKX key revoke,
+  Hyperliquid agent-wallet revoke, Solana delegation revoke or Ethereum smart-account/session-key
+  revoke still needs venue/chain proof. It must not be queued for offline replay.
+- `authorization.rotate` is an online-only local rotation proof update. It requires `confirm=true`;
+  for OKX/Hyperliquid key handles it updates local `rotated_at` / `rotation_reason`, writes sanitized
+  activity and refreshes the metadata used by `authorization.state` and local dispatch readiness. It
+  returns `live_authority_rotated=false` because real venue key material must be rotated outside
+  Sentry first. It must not be queued for offline replay.
+- `secret.store`, `wallet.refs` and `inventory.adapters` return metadata only. They cannot reveal raw venue API secrets, OWS tokens or wallet passphrases.
+- `inventory.sync` defaults to metadata-only. When `live=true`, OKX/Hyperliquid/Solana/Ethereum read-only adapters may perform local reads, but missing local credentials or wallet address env must return blocked access without falling back to demo data. Solana/Ethereum live RPC reads use bounded retry/backoff and return sanitized retry summaries only.
 - `activity.tail` returns recent sanitized local activity events from the configured daemon activity JSONL path. It is read-only, bounded by `limit`, and must not expose raw secret-shaped fields.
-- `policy.local.list` returns local policy metadata; `policy.local.tick` returns due local policies and may mark tick timestamps when `mark=true`. `policy.local.plan` turns due local policies with explicit task templates into planned AgentTasks. `policy.local.run_once` applies local policy guard and optional readiness/dispatch. `policy.local.loop.*` starts, stops, inspects or immediately runs the daemon-owned periodic loop. These are scheduling/readiness surfaces unless `dispatch=true`, and dispatch still requires a registered local Agent plus local readiness.
+- `policy.local.add` upserts sanitized local policy metadata into the daemon policy store. It reuses
+  local policy validation, rejects raw secret-shaped fields, validates target venues and writes
+  `0600` metadata. It does not grant authority, start a loop, mark ticks or dispatch.
+- `policy.local.list` returns local policy metadata; `policy.local.tick` returns due local policies and may mark tick timestamps when `mark=true`. `policy.local.plan` turns due local policies with explicit task templates into planned AgentTasks. `policy.local.run_once` applies local policy guard, local trigger guard from `market_snapshot` or `live_market=true` public OKX/Hyperliquid market reads, configured inventory/risk guard when `check_inventory=true` or readiness/dispatch is requested, and optional readiness/dispatch. Missing trigger data blocks readiness/dispatch; unsatisfied triggers return no-op/skipped and do not spawn an external Agent. `live_inventory=true` may trigger local OKX/Hyperliquid/Solana/Ethereum read adapters; otherwise inventory checks use metadata-only snapshots and block policies that require balances or exposure proof. `policy.local.loop.*` starts, stops, inspects or immediately runs the daemon-owned periodic loop. These are scheduling/readiness surfaces unless `dispatch=true`, and dispatch still requires a registered local Agent plus local readiness.
+- Dashboard exposes `policy.local.run_once` controls as Plan, Preflight and an explicitly armed
+  Dispatch action, plus no-dispatch `policy.local.add` seed, `policy.local.list` policy-store
+  visibility, metadata-only `authorization.state`, confirm-gated local `authorization.revoke`,
+  confirm-gated local `authorization.rotate` and `policy.local.loop.status/start/run_now/stop`
+  controls. The UI can set `live_market=true` with
+  bounded OKX/Hyperliquid venue and symbol lists, opt into `live_inventory=true` for Preflight/loop
+  runs, require signer probe evidence and set local signer handoff timeout. Dispatch stays `false`
+  unless the operator checks `dispatch armed`; armed run-once/loop commands send `dispatch=true` and
+  still rely on daemon-side local readiness, registered Agent task capability and any configured
+  signer command. UI `authorization.revoke` and `authorization.rotate` remain local metadata-only
+  actions and refresh `authorization.state`; they must not claim live venue/chain authority has been
+  revoked or live venue key material has been rotated.
+- New Strategy Local Agent mode may call `policy.local.add` after review/configure/deploy for
+  venue-scoped policies. The command writes metadata only; the UI must still require paired daemon
+  control and must show a blocked state when the Worker bridge is not configured. The Dashboard and
+  `npm run local-bridge:smoke` must share the same local policy metadata builder to prevent frontend
+  payload drift from the repeatable bridge smoke.
 - `policy.pause`, `policy.resume` and `policy.revoke` update local policy state and write sanitized activity. They do not create new authority, raise limits, or bypass local approval.
 - AgentTask with `budget_enforcement='chain_accounting'` must be displayed as authorization/accounting only, not custody.
 
@@ -476,9 +591,17 @@ sentry agent run
 ### Reconnect
 
 - daemon reconnects with exponential backoff and jitter.
-- after reconnect, daemon sends last seen `seq` and receives only missing queued commands.
-- DO must expire stale commands before replay.
-- daemon must deduplicate by `idempotency_key`.
+- replay protection is relay-session scoped: reconnects with the same relay token must keep the last
+  seen sequence values instead of starting at 0.
+- token refresh is challenge-based and rotates to a new relay token before reconnecting. Missing
+  relay tokens are not reused.
+- DO expires stale pending commands before replaying them; only low-risk read/status commands are
+  replayed.
+- acknowledged non-read-only commands are resumed by lookup only: Worker sends `command.resume`,
+  daemon returns a stored local result, `pending`, or `COMMAND_RESUME_NOT_FOUND`; daemon must not
+  execute the original high-risk command again.
+- owner command submit is idempotent by `idempotency_key`; resume preserves the original command id
+  and idempotency key when it returns a stored result.
 
 ### Deploy/restart behavior
 
@@ -553,6 +676,8 @@ GET  /api/local-agents
 GET  /api/local-agents/:agent_id
 POST /api/local-agents/:agent_id/revoke
 GET  /api/local-agents/:agent_id/connect   # WebSocket upgrade
+POST /api/local-agents/:agent_id/relay-token/challenge
+POST /api/local-agents/:agent_id/relay-token/refresh
 POST /api/local-agents/:agent_id/commands
 GET  /api/local-agents/:agent_id/commands
 GET  /api/local-agents/:agent_id/commands/:command_id
@@ -565,21 +690,54 @@ Security:
 
 - `connect` requires WebSocket upgrade.
 - Worker validates owner/session before Durable Object fetch.
-- Durable Object validates signed hello before marking the agent online.
+- Durable Object validates relay-token-bound signed daemon envelopes before accepting hello,
+  heartbeat, status or command-result messages. If a daemon public key is paired, those daemon-origin
+  messages must also carry a valid Ed25519 device signature for the paired key id.
+- daemon validates relay-token-bound signed Worker envelopes before accepting session state changes
+  or remote commands. After `session_accepted`, daemon also requires Worker-origin messages to carry
+  a valid Ed25519 Worker bridge signature for the accepted key id.
+- relay-token refresh requires a Worker-issued challenge signed by the paired daemon Ed25519
+  identity; the AgentSession rotates token hashes, resets token-scoped sequence counters and closes
+  the old WebSocket after successful verification.
 - command submit requires owner auth and command type allowlist.
 - AgentSession keeps the latest bounded command records so Dashboard can poll command results by
   command `message_id` or idempotency key. Stored records use safe payload summaries, not full
-  AgentTask payloads or local DB rows.
+  AgentTask payloads or local DB rows. Summaries may include dispatch/readiness/receipt booleans,
+  signer-probe booleans, signer timeout numbers and whether a Solana/Ethereum signer command was
+  configured, but must not store the signer command string, raw market snapshots, task params or
+  secret-shaped fields. Daemon command results are also recursively sanitized before Worker storage
+  and API return: secret-shaped result fields are redacted and oversized nested structures are
+  bounded. This is a last-resort Worker defense; the daemon and external Agent still must avoid
+  sending wallet secrets, API keys, tokens or passphrases in command results.
+- AgentSession directory keeps a bounded list of paired daemon sessions for Dashboard listing.
+- owner revoke closes the session WebSocket, marks the session `revoked`, and invalidates both relay
+  and owner-control token hashes.
+- daemon treats `session_revoked` and WebSocket close code `1008` with a revoked reason as terminal:
+  heartbeat/reconnect is stopped, a remote-started child process is stopped, the policy loop is
+  stopped, and the daemon does not retry with the invalidated relay token.
 - commands expire by default within 30-120 seconds depending on risk.
 
 ## 11. Failure modes
 
-- daemon offline: Worker returns `AGENT_OFFLINE`; safe commands may queue with expiry, high-risk commands fail fast.
+- daemon offline: low-risk read/status commands are stored in a bounded pending replay queue with
+  expiry; high-risk commands return `AGENT_OFFLINE` and fail fast.
 - Worker offline: Local Agent keeps running local policies and logs locally.
-- WebSocket disconnected during command: command remains pending until ack timeout, then expires or replays after reconnect.
-- duplicate command: daemon returns prior result by idempotency key.
+- WebSocket disconnected before a high-risk command is sent: command fails with `AGENT_OFFLINE`.
+- WebSocket disconnected after send but before `command_ack`: command finalizes as
+  `COMMAND_ACK_TIMEOUT`.
+- WebSocket disconnected after `command_ack` but before `command_result`: on reconnect Worker sends
+  `command.resume`; daemon returns a stored local result from `~/.sentry/command-results.json`,
+  reports `pending` if the original command is still in-flight, or finalizes the original command as
+  `COMMAND_RESUME_NOT_FOUND`. It never replays the original high-risk command.
+- Low-risk read/status commands queued while daemon is offline can replay after reconnect until
+  expiry.
+- duplicate command: same `idempotency_key` and command type returns the existing safe command record
+  instead of sending a second command; reusing a key for a different command type conflicts.
 - stale inventory: daemon rejects execution and asks for sync.
-- revoked pairing: daemon closes bridge and refuses remote commands.
+- revoked pairing: Worker marks the AgentSession `revoked`; daemon closes bridge, refuses remote
+  commands and does not reconnect with the old relay token.
+- relay token refreshed: Worker closes the old WebSocket, daemon suppresses retry with the stale
+  token and reconnects using the newly issued short-lived relay token.
 - Worker compromised: attacker cannot obtain wallet/venue secrets; local agent still applies signed envelope, owner/session and local policy checks.
 - local machine compromised: outside Sentry's full mitigation; user must revoke venue keys and chain policies.
 
@@ -601,7 +759,16 @@ P1 minimal bridge:
 - external Agent child process manager over stdio;
 - Worker pairing endpoints;
 - WebSocket connect to AgentSession DO;
-- heartbeat/status, `agent.start` / `agent.stop`, guarded `agent.dispatch` skeleton, local policy store/due-tick skeleton and sanitized local `activity.tail`. OKX has a `place_order` task/result verifier, local dispatch-readiness gate, order-status adapter and daemon receipt verifier skeleton; Hyperliquid has a `place_order` task/result verifier, public `userRole` live grant checker, pre-signed exchange-submit adapter, default local nonce store plus public order-status receipt verifier; Solana and Ethereum have task/result verifier, env-account local dispatch-ready gates, non-signing signer/address probe and RPC receipt polling skeletons but remain blocked for global dispatch until executable transaction-build adapters exist.
+- heartbeat/status, session directory listing, owner revoke, command-result polling, `agent.start` /
+  `agent.stop`, guarded `agent.dispatch` skeleton, local policy store/due-tick/planning/run-once/loop
+  skeletons, configured inventory/risk guards and sanitized local `activity.tail`. OKX has a `place_order` task/result verifier, local
+  dispatch-readiness gate, order-status adapter and daemon receipt verifier skeleton; Hyperliquid has
+  a `place_order` task/result verifier, public `userRole` live grant checker, pre-signed
+  exchange-submit adapter, default local nonce store plus public order-status receipt verifier; Solana
+  and Ethereum have task/result verifier, env-or-OWS-account local dispatch-ready gates, non-signing
+  signer/address probe, metadata-only authorization state snapshots and RPC receipt polling skeletons
+  but remain blocked for global dispatch until real OWS/Safe signer grant installation and live-account
+  dry-runs exist.
 
 P2 local read model:
 
@@ -620,7 +787,7 @@ P3 command bridge:
 
 P4 execution:
 
-- OWS signer integration;
+- OWS signer/API token handoff;
 - exchange SecretStore;
 - per-venue adapters;
 - command result audit;

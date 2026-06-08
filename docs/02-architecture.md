@@ -339,7 +339,8 @@ Daemon → validates locally → executes → returns command_result
 - External Agent returns unverifiable result：daemon marks as unresolved; does not update spent_amount.
 - Revoke succeeds but daemon misses update：next chain/policy read detects and stops.
 - Worker bridge disconnects：daemon continues local tick; reconnects with backoff.
-- Duplicate remote command：daemon deduplicates by idempotency key.
+- Duplicate remote command：AgentSession deduplicates caller-provided `idempotency_key` before
+  sending a second command to daemon.
 
 ## 8. Deployment Shape
 
@@ -356,11 +357,11 @@ Production hardening backlog:
 - Agent dispatch protocol formalization (MCP).
 - AuthorizationAdapter registry and conformance tests.
 - Sui chain-authorized accounting hardening; custody wrapper v2 only if the product moves to unattended real funds.
-- Shared target venue catalog across frontend, Worker and daemon; Solana/Ethereum inventory reads are wired as local read-only RPC adapters, and both have swap `submit_tx` task/result verifier, env-account local dispatch-ready gates, non-signing signer/address probe and RPC receipt polling skeletons while executable transaction-build adapters remain planned.
+- Shared target venue catalog across frontend, Worker and daemon; Solana/Ethereum inventory reads are wired as local read-only RPC adapters, and both have swap `submit_tx` task/result verifier, env-or-OWS-account local dispatch-ready gates, non-signing signer/address probe, bounded JSON-RPC retry/backoff and RPC receipt polling skeletons while executable transaction-build adapters remain planned.
 - Solana authorization feasibility: native delegation / Sigil / Squads / custom Anchor only if required.
 - Ethereum authorization feasibility: Safe guard/module / account abstraction / custom contract only if required.
 - Hyperliquid adapter: read-only inventory, `place_order` AgentTask/result verifier, local agent-wallet grant proof, public `userRole` live grant check, pre-signed `/exchange` submit adapter, default local nonce store and public `orderStatus` receipt verifier exist; next work is production UI wiring, live-account dry-runs and live submit verification.
-- OKX adapter: read-only inventory plus `place_order` AgentTask/result verifier, local permission/IP allowlist proof gate, order-status adapter, bounded retry/backoff and daemon dispatch receipt verifier skeleton exists; next work is venue-side proof hardening, production UI wiring and production dispatch-readiness.
+- OKX adapter: read-only inventory plus `place_order` AgentTask/result verifier, local permission/IP allowlist proof gate, signed live-read credential proof, order-status adapter, bounded retry/backoff and daemon dispatch receipt verifier skeleton exists; next work is complete permission enumeration, live key revoke/rotation, production UI wiring and production dispatch-readiness.
 - Multi-agent concurrency and conflict resolution.
 - Strategy Marketplace and multi-leg templates.
 - Dedicated event indexer and GraphQL migration.

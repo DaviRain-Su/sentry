@@ -290,7 +290,12 @@ Ask design to produce these screens first:
 - Add real tx/order details to the transaction drawer.
 - Make Local Agent the default run mode.
 - Add OWS vault, exchange key, venue account and asset source panels to Profile / Wallet.
-- Add CLI pairing and Worker bridge status to Profile / Wallet.
+- Add CLI pairing and Worker bridge status to Profile / Wallet. Current implementation has a first
+  Profile bridge panel for pairing code creation, daemon CLI command display, AgentSession status,
+  indexed AgentSession listing, `agent.probe` submission, `activity.tail` queuing,
+  read-only `wallet.refs`, `policy.local.run_once` plan/preflight, explicit dispatch arming,
+  signer-probe and signer-timeout controls, metadata-only inventory guard on Preflight/dispatch,
+  loop status/start/run_now/stop, bridge revoke and command-result polling.
 - Label Cloud Worker as optional Sui Testnet runtime, not the production custody path.
 
 ### P1: show product breadth without overbuilding execution

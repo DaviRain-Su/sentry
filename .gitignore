@@ -55,6 +55,11 @@ coverage/
 *.temp
 .cache/
 
+# Playwright artifacts
+test-results/
+playwright-report/
+*.tmp.spec.js
+
 # Lock files (optional - keep if you want reproducible builds)
 # package-lock.json
 # yarn.lock

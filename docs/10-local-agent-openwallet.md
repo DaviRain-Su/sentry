@@ -72,7 +72,7 @@ OWS 的 `ApiKey` 是访问本地钱包 secret 的 capability，不是 OKX / Bina
 - 优先要求 subaccount。
 - 支持 IP allowlist 检查。
 - 支持 per-venue notional cap、daily loss cap、reduce-only mode。
-- key rotation、disable、recheck scopes 必须是一等操作。
+- key rotation、disable、recheck scopes 必须是一等操作；当前已有本地 `venue rotate --confirm` / remote `authorization.rotate` metadata proof gate 和 `authorization.revoke` 本地停用，真实 venue rotation/revoke API 仍需后续接入。
 
 ### 资产信息
 
@@ -106,7 +106,7 @@ type AssetPosition = {
 
 Guardian 只消费这个归一化后的 inventory snapshot。
 
-当前实现状态:`core/local-secrets.js` 已提供 metadata-only key handle skeleton,`core/inventory.js` 已提供 read-only inventory adapter registry skeleton。它们只返回 key handle、权限、subaccount/account ref、adapter readiness 和 access issues;不会保存 raw secret,也不会伪造余额。显式 live inventory sync 已有 OKX、Hyperliquid、Solana、Ethereum 的只读 adapter skeleton。OKX 另有 `core/okx-trade.js` 的 `place_order` AgentTask/result verifier、`agent/src/okx-order-status-adapter.mjs` 的订单状态查询 skeleton,以及 `agent/src/dispatch-receipt-verifier.mjs` 的 daemon dispatch receipt verification。Hyperliquid 另有 `core/hyperliquid-trade.js` 的 `place_order` AgentTask/result verifier、`agent/src/hyperliquid-agent-wallet-adapter.mjs` 的 public `userRole` agent-wallet live grant checker、`agent/src/hyperliquid-order-status-adapter.mjs` 的 public `orderStatus` 查询 skeleton,并已接入 daemon dispatch receipt verification。Solana/Ethereum 另有 `submit_tx` task/result verifier、env wallet/account 匹配的 task-local dispatch-ready gate、非签名 signer/address probe 和 mock-tested RPC receipt polling skeleton。但生产下单仍默认 blocked;其它交易执行、OWS account discovery、真实签名验证和签名授权仍然交给外部 Agent / OWS / 原生钱包工具。
+当前实现状态:`core/local-secrets.js` 已提供 metadata-only key handle skeleton,`core/inventory.js` 已提供 read-only inventory adapter registry skeleton,`core/wallet-refs.js` + `agent/src/local-wallet-store.mjs` 已提供 metadata-only OWS wallet reference store。它们只返回 key handle、权限、subaccount/account ref、OWS wallet id、vault path、CAIP-10 account、adapter readiness 和 access issues;不会保存 raw secret、OWS token、passphrase 或私钥,也不会伪造余额。`sentry-daemon wallet link/list/remove` 写 `~/.sentry/wallets.json`,`wallet.refs` 可通过 Worker bridge 只读查询。显式 live inventory sync 已有 OKX、Hyperliquid、Solana、Ethereum 的只读 adapter skeleton。OKX 另有 `core/okx-trade.js` 的 `place_order` AgentTask/result verifier、`agent/src/okx-order-status-adapter.mjs` 的订单状态查询 skeleton,以及 `agent/src/dispatch-receipt-verifier.mjs` 的 daemon dispatch receipt verification。Hyperliquid 另有 `core/hyperliquid-trade.js` 的 `place_order` AgentTask/result verifier、`agent/src/hyperliquid-agent-wallet-adapter.mjs` 的 public `userRole` agent-wallet live grant checker、`agent/src/hyperliquid-order-status-adapter.mjs` 的 public `orderStatus` 查询 skeleton,并已接入 daemon dispatch receipt verification。Solana/Ethereum 另有 `submit_tx` task/result verifier、env 或 OWS wallet reference 匹配的 task-local dispatch-ready gate、非签名 signer/address probe、prepared transaction 本地 signer command handoff、bounded JSON-RPC retry/backoff 和 mock-tested RPC receipt polling skeleton。但生产 OWS signing/API token handoff、真实签名验证、Safe/session-key grant 和真实账户 dry-run 仍未完成;守护程序仍不保存私钥。
 `agent/src/local-activity-log.mjs` 已提供本地脱敏 activity JSONL writer 和 `activity tail` 读取能力,但 PolicyManager/TickLoop/Guardian 产生的连续运行日志还未接入。
 `agent/src/local-policy-store.mjs` 已提供本地 policy metadata store、`sentry-daemon policy add/list/pause/resume/revoke` 和 due-tick 计算。`agent/src/local-policy-task-planner.mjs` 已能把到期 policy 中显式声明的 `task_template(s)` / `planned_tasks` 转成 OKX、Hyperliquid、Solana、Ethereum 的 planned AgentTask。`agent/src/local-policy-runner.mjs` 已提供一次性 `policy run-once` 骨架,会做本地 policy guard、可选 readiness check,并且只有显式 `--dispatch` 才会下发到注册的外部 Agent。`agent/src/local-policy-loop.mjs` 已提供 daemon 内周期 loop controller,可启动/停止/查询/立即运行并复用 run-once;它仍默认不 dispatch,也还不是生产完整 Guardian loop。
 
@@ -130,26 +130,39 @@ Dashboard
 
 核心进程:
 
-- `sentry agent init`:初始化守护程序配置,生成 identity key(用于 Worker bridge 签名)。
+- `sentry agent init`:未来统一的初始化命令。当前 daemon 在 pairing 时会自动生成/加载
+  `~/.sentry/identity.json` Ed25519 identity,用于签名 Worker pairing proof、Worker relay-token
+  refresh challenge 和 daemon-origin WebSocket envelope。AgentSession 也会持久化 Worker bridge
+  Ed25519 identity,daemon 在 `session_accepted` 后验 Worker-origin WebSocket envelope。Worker 只保存
+  daemon 公钥元数据和自己的 bridge 私钥,不保存钱包/venue secret。
 - `sentry-daemon agent register <agent-type> --command "<cmd>"`:注册外部 Agent(Claude Code / Codex / Kimi)本地命令 metadata。当前实现写 `~/.sentry/agents.json`;未来统一为 `sentry agent register`。
 - `sentry-daemon agent probe <agent-id>`:对已注册外部 Agent 做本地 `--version` 探测和声明 capability 检查,只返回 bounded metadata,不证明真实交易执行能力。
 - `sentry agent pair <pairing-code>`:把本机守护程序与浏览器账户 / Worker AgentSession 配对。
-- `sentry wallet link --ows <wallet>`:记录 OWS wallet reference(外部 Agent 执行时使用)。
+- `~/.sentry/identity.json`:当前 daemon 默认 Ed25519 identity store,包含 daemon 自己的
+  pairing/refresh proof private key,权限 0600;不得放钱包私钥、OWS token 或交易所 secret。可用
+  `--identity-store` / `SENTRY_IDENTITY_STORE` 覆盖。
+- `sentry-daemon wallet link --wallet-id <ows_wallet> --accounts solana:mainnet:<address>,eip155:1:<address>`:记录 OWS wallet reference(外部 Agent 执行时使用)。当前实现写 `~/.sentry/wallets.json`,只存 wallet id、vault path、CAIP-10 accounts、policy ids 和 capabilities,拒绝 OWS token/passphrase/private key。
+- `sentry-daemon wallet list/remove`:查看或删除本地 OWS wallet reference metadata。
 - `sentry-daemon venue add --venue okx --key-handle <handle> --account-ref <subaccount> --permissions read,place_order,cancel_order --ip-allowlist true`:记录 OKX key handle + 权限/IP allowlist attestation(raw secret 存 OS keychain,外部 Agent 读取)。
+- `sentry-daemon authorization rotate --venue hyperliquid --key-handle <handle> --confirm`:在 operator 已经于交易所外部完成 key material 轮换后,只更新本地 `rotated_at` metadata;Dashboard 通过 `authorization.rotate` 调用同一条本地 proof gate。
 - `sentry-daemon venue add --venue hyperliquid --key-handle <handle> --account-ref <subaccount> --read-account-address <0x...> --agent-wallet-address <0x...> --permissions read,place_order,cancel_order,set_leverage`:记录 Hyperliquid agent wallet / subaccount handle + 权限。`read_account_address` 必须是实际 master/subaccount 地址,不能填 agent wallet 地址；`agent_wallet_address` 是被授权下单的 agent wallet 地址。
 - `sentry-daemon venue list/remove`:查看或删除本地 venue metadata。当前实现只写 `~/.sentry/venues.json` metadata,不导入 raw secret。
 - `sentry-daemon venue credentials status --venue okx --key-handle <handle>`:检查 OKX env / macOS Keychain credential 是否齐全,不展示 raw secret。
 - `sentry-daemon venue credentials store --venue okx --key-handle <handle>`:通过 macOS `security` 交互式 prompt 写入 OKX API key / secret / passphrase,不接受 raw secret CLI 参数。
 - `sentry-daemon signer probe --scope solana-mainnet,ethereum-mainnet --json`:用 `SENTRY_SOLANA_SIGNER_ADDRESS` / `SENTRY_SOLANA_SIGNER_PROBE_COMMAND` 和 `SENTRY_ETHEREUM_SIGNER_ADDRESS` / `SENTRY_ETHEREUM_SIGNER_PROBE_COMMAND` 做非签名地址证明,不读取私钥。
+- `SENTRY_SOLANA_SIGNER_COMMAND` / `--solana-signer-cmd`:把已通过 verifier 的 Solana `proposed` unsigned transaction 交给本机 signer 命令,该命令从 stdin 读取 `{ task, proposed_result, prepared_transaction }`,返回 signature 或完整 AgentTaskResult;守护程序随后查 `getSignatureStatuses`。
+- `SENTRY_ETHEREUM_SIGNER_COMMAND` / `--ethereum-signer-cmd`:把已通过 verifier 的 Ethereum transaction request 交给本机 signer 命令,该命令从 stdin 读取 `{ task, proposed_result, prepared_transaction }`,返回 tx hash 或完整 AgentTaskResult;守护程序随后查 `eth_getTransactionReceipt`。
 - `sentry-daemon activity tail --limit 50 --json`:读取当前本地 activity JSONL 的最近事件;当前实现只返回脱敏后的 dispatch blocked / accepted 摘要。
-- `sentry-daemon policy add/list/pause/resume/revoke/tick/plan/run-once` 和 daemon `--policy-loop`:当前实现写 `~/.sentry/policies.json` metadata、计算 due ticks、基于显式 task template 生成 planned AgentTask,并可用 `run-once` 或周期 loop 做 guard/readiness/dispatch;未来统一为 `sentry policy ...` 并补齐生产 Guardian loop 的库存新鲜度、深度任务级 Agent 能力发现和 UI 控制。
+- `~/.sentry/bridge-sequences.json`:当前 daemon 默认 Worker bridge sequence store,只保存 relay-token-derived key 与 inbound/outbound seq,不保存 relay token、HMAC signing key、OWS token 或交易所 secret。可用 `--bridge-sequence-store` / `SENTRY_BRIDGE_SEQUENCE_STORE` 覆盖。
+- `sentry-daemon market snapshot --market-venues okx,hyperliquid --market-symbols BTC,ETH`:从 OKX public ticker/funding 和 Hyperliquid public market info 构建一次性 market snapshot,不需要 API key。
+- `sentry-daemon policy add/list/pause/resume/revoke/tick/plan/run-once` 和 daemon `--policy-loop`:当前实现写 `~/.sentry/policies.json` metadata、计算 due ticks、基于显式 task template 生成 planned AgentTask,并可用 `run-once` 或周期 loop 做本地 policy guard、`--market-snapshot` / `--live-market` 触发器检查、配置化 inventory/risk checks、readiness/dispatch。Worker bridge 已支持远程 `policy.local.add` metadata upsert,Profile / Wallet 已能 seed 本地 Hyperliquid/OKX policy、展示 `authorization.state.readiness_summary`、plan/preflight、显式 arm dispatch、要求 signer probe、设置 signer handoff timeout 并控制 policy loop;未来统一为 `sentry policy ...` 并补齐生产 durable market subscription、完整 Guardian loop 和深度任务级 Agent 能力发现。
 - `sentry agent run`:启动守护程序 tick loop、loopback API、Agent 调度。
 - `sentry agent disconnect`:撤销 Worker bridge session,守护程序仍可 local-only 运行。
 - `sentry inventory sync`:刷新资产快照,守护程序归一化后写 InventoryStore。默认 metadata-only;显式 live 模式可以走本地只读 adapter 或分发给外部 Agent。
 - `sentry policy deploy`:创建链上 policy 或 venue mandate。
 - `sentry emergency-stop`:暂停守护程序调度;如有需要,通过外部 Agent 发送 revoke/cancel。
 
-注意:交易执行类任务仍然是守护程序分发 AgentTask 给外部 Agent,外部 Agent 使用 OWS / 钱包 / venue API 完成签名或下单。只读健康检查和提交后状态查询可以由守护程序内置 adapter 完成:Solana/Ethereum 读取本地配置的 RPC + wallet address,可在 task account 与 env wallet 匹配时创建任务级 local dispatch-ready override,可附带非签名 signer/address probe,并可在 dispatch 后按 signature / tx hash 查询 receipt;OKX 读取本地 env 或 macOS Keychain credential 并可按 `ordId` / `clOrdId` 查询订单状态;Hyperliquid 读取本地 metadata/key handle,在显式 live inventory 模式下访问 venue read API,并在 daemon `agent.dispatch` 默认用 public `info.userRole` 验证 agent wallet 仍指向预期 master/subaccount。守护程序不得持有私钥,也不得把 raw API secret 返回给 Worker。
+注意:交易执行类任务仍然是守护程序分发 AgentTask 给外部 Agent,外部 Agent 使用 OWS / 钱包 / venue API 完成签名或下单。只读健康检查、prepared transaction handoff 和提交后状态查询可以由守护程序内置 adapter 协调:Solana/Ethereum 读取本地配置的 RPC + wallet address,并可展示本地 OWS wallet references;可在 task account 与 env wallet 或 metadata-only OWS wallet ref 匹配时创建任务级 local dispatch-ready override,可附带独立的非签名 signer/address probe,可将 accepted `proposed` 结果交给本机 signer command,并在 dispatch 后按 signature / tx hash 查询 receipt;这些 Solana/Ethereum RPC reads 和 receipt polling 有 bounded retry/backoff,但不是 durable subscription。OKX 读取本地 env 或 macOS Keychain credential 并可按 `ordId` / `clOrdId` 查询订单状态;Hyperliquid 读取本地 metadata/key handle,在显式 live inventory 模式下访问 venue read API,并在 daemon `agent.dispatch` 默认用 public `info.userRole` 验证 agent wallet 仍指向预期 master/subaccount。守护程序不得持有私钥、OWS token 或 passphrase,也不得把 raw API secret 返回给 Worker。
 
 ## 6. 需要改的文档（已完成 2026-06-03）
 
@@ -187,7 +200,11 @@ P1:
 - Node SDK 是 in-process NAPI;对长期 autonomous agent,最好用 local service 或 subprocess signer,避免 agent 主进程和解密 secret 长期共享地址空间。
 - OWS 当前并不提供 per-wallet nonce manager。EVM / CEX adapters 需要 Sentry 自己处理 nonce、client order id、idempotency。
 - OWS declarative policy 目前很窄。Sentry 的预算、slippage、venue caps、simulation、inventory constraints 需要 executable policies 或 Sentry Guardian 在 OWS 之外执行。
-- Worker bridge 的 WebSocket 长连接需要处理 Cloudflare deploy/restart 造成的断线重连、command replay、sequence 和 idempotency。
+- Worker bridge 的 WebSocket 长连接已处理同一 relay session 的断线重连 sequence 续接;relay token
+  可通过 Worker challenge + daemon Ed25519 proof 换发并重连。低风险 read/status 命令已有 bounded
+  offline queue 并会在 daemon 重连后 replay;Worker command submit 已按 `idempotency_key` 去重。
+  daemon-origin 和 Worker-origin WebSocket envelope 都已绑定 paired Ed25519 bridge identity;Cloudflare
+  deploy/restart 后的高风险命令 replay/resume 语义仍需继续补齐。
 
 ## 9. 参考
 
